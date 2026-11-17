@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopforge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314161b'/%3E%3Cpath d='M7 21h18M9 17h3M14 13h3M19 9h3M14 17h3M19 13h3M19 17h3' stroke='%23f5a524' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="plugin" id="plugin">
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 21h18M9 17h3M14 13h3M19 9h3M14 17h3M19 13h3M19 17h3" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <span class="word">LOOPFORGE</span>
+      <span class="ver" id="ver"></span>
+    </div>
+    <div class="lcd" aria-live="polite">
+      <div><span id="lcd-bpm">---.--</span><label>BPM</label></div>
+      <div><span id="lcd-bars">2</span><label>BARS</label></div>
+      <div class="lcd-status"><span id="lcd-status">READY</span></div>
+    </div>
+    <div class="top-actions">
+      <button class="ghost small" id="btn-favs" title="Open your favourites folder">★ <span id="fav-count">0</span></button>
+      <button class="ghost small" id="btn-workspace" title="Open the Loopforge folder">Folder</button>
+      <span class="led" id="led" title="engine status"></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel refs" id="refs-panel">
+      <div class="panel-head">
+        <h2>References</h2>
+        <span class="hint">1–3 loops whose feel you want</span>
+      </div>
+      <div class="ref-slots" id="ref-slots"></div>
+      <input type="file" id="ref-file" accept=".wav,.aif,.aiff,.flac,audio/*" multiple hidden>
+    </section>
+
+    <section class="panel library">
+      <div class="panel-head">
+        <h2>Library</h2>
+        <span class="hint">where new sounds come from</span>
+      </div>
+      <button class="lib-path" id="lib-path" title="Choose your sample library folder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        <span id="lib-path-text">Choose your loop library…</span>
+      </button>
+      <div class="lib-stats" id="lib-stats"></div>
+      <div class="progress" id="lib-progress" hidden><div class="bar"></div><span class="ptext"></span></div>
+      <div class="row end"><button class="ghost small" id="btn-rescan" disabled>Rescan library</button></div>
+    </section>
+
+    <section class="panel engine">
+      <div class="panel-head">
+        <h2>Engine</h2>
+        <span class="hint">drag knobs · double-click to reset</span>
+      </div>
+      <div class="engine-row">
+        <div class="knobs">
+          <div class="knob-wrap" id="k-similarity"></div>
+          <div class="knob-wrap" id="k-swing"></div>
+          <div class="knob-wrap" id="k-variations"></div>
+          <div class="knob-wrap" id="k-palette"></div>
+        </div>
+        <div class="engine-side">
+          <div class="field">
+            <label>Length</label>
+            <div class="seg" id="seg-bars" role="radiogroup" aria-label="Loop length in bars">
+              <button data-v="1" role="radio">1 bar</button><button data-v="2" role="radio">2 bars</button><button data-v="4" role="radio">4 bars</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="seed">Seed</label>
+            <div class="seed-row">
+              <input id="seed" type="number" min="0" max="999999" step="1" value="42">
+              <button class="ghost small" id="btn-dice" title="Random seed">⚄</button>
+            </div>
+          </div>
+          <button class="generate" id="btn-generate"><span class="gtext">Generate</span><span class="gprog"></span></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel results">
+      <div class="panel-head">
+        <h2>Results</h2>
+        <select id="runs" title="Earlier runs"></select>
+        <span class="spacer"></span>
+        <span class="legend" aria-label="Hit colours"><span><i style="background:var(--closed)"></i>closed</span><span><i style="background:var(--open)"></i>open</span><span><i style="background:var(--shaker)"></i>shaker</span><span><i style="background:var(--perc)"></i>perc</span></span>
+      </div>
+      <div class="grid" id="results"></div>
+      <div class="empty" id="results-empty">
+        <p><strong>No loops yet.</strong> Add references, choose your library, then hit <em>Generate</em>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="console">
+    <button class="ghost tiny" id="btn-log">Log ▾</button>
+    <pre id="log" hidden></pre>
+  </footer>
+</div>
+
+<dialog id="browser">
+  <form method="dialog" class="browser">
+    <div class="browser-head">
+      <h3>Choose your library folder</h3>
+      <button value="cancel" class="ghost small" aria-label="Close">✕</button>
+    </div>
+    <div class="crumbs">
+      <button type="button" class="ghost small" id="br-up" title="Up one folder">↑</button>
+      <input id="br-path" spellcheck="false" aria-label="Folder path">
+      <button type="button" class="ghost small" id="br-go">Go</button>
+    </div>
+    <div class="br-roots" id="br-roots"></div>
+    <ul class="br-list" id="br-list"></ul>
+    <div class="browser-foot">
+      <span id="br-count" class="hint"></span>
+      <span class="spacer"></span>
+      <button value="cancel" class="ghost">Cancel</button>
+      <button type="button" id="br-use" class="primary">Use this folder</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

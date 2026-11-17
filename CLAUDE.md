@@ -86,14 +86,31 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   detected BPM, exact length, seam ratio, hits/bar, step agreement, role match vs. chance, accent corr,
   role-mix L1, timbre stats, file usage → `report.md` + recipe `metrics`.
 
+## UI (`loopforge ui`, `loopforge/ui/`)
+- Stdlib `ThreadingHTTPServer` on 127.0.0.1 (port 8765, next free if taken) + static vanilla HTML/CSS/JS
+  (no build step, no CDN — works offline). Chosen over Gradio so it looks like a plugin and so the front-end
+  can be reused in JUCE 8's WebView UI later.
+- `service.py` holds the orchestration shared by CLI and UI (`load_ref`, `run_generation`, `GenRequest`).
+- `ui/server.py` `App` keeps state; indexing/generation run in background threads, the page polls `/api/state`.
+  Workspace `~/Loopforge` (or `$LOOPFORGE_HOME`): `refs/` (uploaded refs), `runs/<timestamp>/`, `favorites/`,
+  `settings.json` (knobs, library, ref paths — restored on start). `/api/file` only serves files under the
+  workspace, the library or a ref's folder.
+- Front-end: knobs (drag/wheel/arrows, double-click reset), WebAudio looping playback (`loop=true`, so the seam
+  is audible), A/B vs ref 1 in time, favourites, drag-out to DAW via `DownloadURL` (Chrome/Edge).
+- Launchers: `Start Loopforge.command` (macOS) / `Start Loopforge.bat` (Windows) install uv if needed,
+  `uv sync`, `uv run loopforge ui`.
+
 ## Known limitations
 - Non-loop files with flams ~0.3 step after the beat can be read with flipped even/odd parity
   (shows up as swing ≈ 0.3). Trimmed loops are unaffected (phase fixed at file start).
 - Downbeat of non-loop files is not detected (grid phase only).
 - Library slices end at the next onset of their source loop, so long sounds (open hats) from dense loops are
   pre-truncated; selection prefers longer candidates for ringing roles but cannot recover cut tails.
+- Onsets: in a synthetic stress test ~4% of quiet closed hats right after a loud open hat (same HP-noise
+  spectrum) are missed at delta 0.1. More sensitivity (delta 0.07–0.08) fixes most but adds 1–3 extra
+  hits to the user's refs — unverified by ear, so the default stays until listening feedback.
 - Re-analysing outputs that contain flams reports spurious swing (~0.1–0.15); the output grid is straight.
 
 ## Milestones
 M1 analysis + `analyze` ✅ · M2 library index + `neighbors` ✅ · M3 generator v1 ✅ · M4 similarity/novelty/
-variations · M5 Gradio listening UI.
+variations · M5 listening UI ✅ (pulled forward; local web UI instead of Gradio).
