@@ -183,6 +183,113 @@ def cmd_neighbors(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gen_params(args: argparse.Namespace):
+    from loopforge.config import GenParams
+
+    kw = {k: getattr(args, k) for k in ("bars", "similarity", "swing", "bpm", "palette_size", "max_file_share")
+          if getattr(args, k, None) is not None}
+    return GenParams(**kw)
+
+
+def cmd_generate(args: argparse.Namespace) -> int:
+    import numpy as np
+
+    from loopforge.analysis.loop import analyze_loop
+    from loopforge.audio_io import file_sha1, load_audio, write_wav
+    from loopforge.diagnostics import evaluate_output, generation_report, plot_analysis, timbre_stats
+    from loopforge.generator.profile import build_profile
+    from loopforge.generator.run import generate_one, selection_mask
+    from loopforge.library import FeatureSpace, NearestNeighbors, load_slice_table
+    from loopforge.library.slices import recipe_loader
+
+    aparams = _analysis_params(args)
+    gp = _gen_params(args)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+
+    analyses, rms, refs_info, ref_audio = [], [], [], []
+    for r in args.refs:
+        audio, sr = load_audio(r)
+        ref_audio.append((Path(r).stem, audio, sr))
+        a = analyze_loop(audio, sr, name=Path(r).name, params=aparams, bpm=args.bpm)
+        analyses.append(a)
+        rms.append(float(np.sqrt(np.mean(audio.astype(np.float64) ** 2))))
+        refs_info.append({"path": str(Path(r).resolve()), "sha1": file_sha1(r), "bpm": a.tempo.bpm,
+                          "bars": a.tempo.bars, "beats": a.tempo.beats, "swing": round(a.swing, 4),
+                          "slices": len(a.slices)})
+        print(f"ref  {Path(r).name}: {a.tempo.bpm:g} BPM ({a.tempo.method}), {a.steps_total} steps, "
+              f"{len(a.slices)} hits, swing {a.swing:.3f}")
+    bpms = [a.tempo.bpm for a in analyses]
+    if not args.bpm and max(bpms) / min(bpms) > 1.03:
+        print(f"error: refs disagree on tempo ({', '.join(f'{b:g}' for b in bpms)}); pass --bpm", file=sys.stderr)
+        return 1
+
+    if not args.no_update:
+        _ensure_index(args.library, args.cache, aparams, args.jobs, quiet=True)
+    table = load_slice_table(args.library, args.cache)
+    space = FeatureSpace.fit(table.features, group_weights=dict(gp.timbre_group_weights))
+    nn = NearestNeighbors(space, table.features)
+    profile = build_profile(analyses, rms, space, gp, bpm=args.bpm)
+    exclude = selection_mask(table, gp, {ri["sha1"] for ri in refs_info} if not args.allow_ref_files else set())
+    print(f"lib  {len(table.files)} files, {len(table)} slices ({int((~exclude).sum())} usable)")
+    print("roles " + ", ".join(f"{r.name} ({r.share:.0%})" for r in profile.roles))
+    (out / "profile.json").write_text(json.dumps(profile.summary(), indent=1))
+
+    loader = recipe_loader()
+    ref_t = timbre_stats(analyses)
+    rows = []
+    for v in range(args.variations):
+        seed = args.seed + v
+        recipe, audio = generate_one(profile, table, nn, gp, seed, exclude, loader, refs_info, __version__)
+        stem = f"var_{v + 1:02d}_seed{seed}"
+        wav = write_wav(out / f"{stem}.wav", audio, recipe.sr)
+        oa = analyze_loop(audio, recipe.sr, name=wav.name, params=aparams)
+        recipe.metrics = evaluate_output(audio, oa, recipe, profile, ref_t, space)
+        recipe.save(out / f"{stem}.json")
+        if not args.no_png:
+            plot_analysis(audio, oa, out / f"{stem}.png")
+        m = recipe.metrics
+        print(f"gen  {wav.name}: {len(recipe.events)} events, detected {m['detected_bpm']:g} BPM, "
+              f"seam {m['seam_ratio']:.2f}, role match {m['role_match']:.2f}, accent corr {m['accent_corr']:.2f}, "
+              f"{m['files_used']} files, template {recipe.template}")
+        rows.append({"file": wav.name, "seed": seed, "metrics": m, "template": recipe.template})
+        if args.audition:
+            _write_audition(out / "listen", stem, audio, recipe, ref_audio)
+    report = generation_report(rows, profile, [Path(r).name for r in args.refs], "loopforge " + " ".join(sys.argv[1:]))
+    (out / "report.md").write_text(report)
+    print(f"\nreport {out / 'report.md'}")
+    return 0
+
+
+def _write_audition(folder: Path, stem: str, audio, recipe, ref_audio) -> None:
+    """<stem>_x4.wav (loop repeated: seam check) and <stem>_AB.wav (first ref, same length, x2 -> loop x2)."""
+    import numpy as np
+
+    from loopforge.audio_io import resample, to_stereo, write_wav
+
+    write_wav(folder / f"{stem}_x4.wav", np.tile(audio, (1, 4)), recipe.sr)
+    name, ra, rsr = ref_audio[0]
+    ra = to_stereo(resample(ra, rsr, recipe.sr))[:, : recipe.n_samples]
+    if ra.shape[1] < recipe.n_samples:
+        ra = np.pad(ra, ((0, 0), (0, recipe.n_samples - ra.shape[1])))
+    gap = np.zeros((2, recipe.sr // 2), np.float32)
+    write_wav(folder / f"{stem}_AB.wav", np.concatenate([np.tile(ra, (1, 2)), gap, np.tile(audio, (1, 2))], 1),
+              recipe.sr)
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    from loopforge.audio_io import write_wav
+    from loopforge.generator.recipe import Recipe, render_recipe
+    from loopforge.library.slices import recipe_loader
+
+    recipe = Recipe.load(args.recipe)
+    audio = render_recipe(recipe, recipe_loader(args.library))
+    out = Path(args.out) if args.out else Path(args.recipe).with_suffix(".render.wav")
+    write_wav(out, audio, recipe.sr)
+    print(f"rendered {out} ({audio.shape[1]} samples @ {recipe.sr} Hz)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="loopforge", description="Generate new top loops from your own samples.")
     ap.add_argument("--version", action="version", version=f"loopforge {__version__}")
@@ -230,6 +337,33 @@ def build_parser() -> argparse.ArgumentParser:
     nb.add_argument("--no-update", action="store_true", help="skip the incremental index update")
     nb.add_argument("--jobs", type=int, default=None)
     nb.set_defaults(func=cmd_neighbors)
+
+    g = sub.add_parser("generate", help="generate new loops from refs + library")
+    g.add_argument("--refs", nargs="+", required=True, help="1-3 reference loops")
+    g.add_argument("--library", required=True)
+    g.add_argument("--cache", default=None)
+    g.add_argument("--bars", type=int, default=2)
+    g.add_argument("--variations", type=int, default=8)
+    g.add_argument("--similarity", type=float, default=0.7, help="0 = loose, 1 = close to the refs (default 0.7)")
+    g.add_argument("--seed", type=int, default=42, help="variation i uses seed+i")
+    g.add_argument("--swing", type=float, default=None, help="output swing in steps (0.33 = triplet feel)")
+    g.add_argument("--bpm", type=float, default=None, help="override tempo of refs/output")
+    g.add_argument("--palette-size", type=int, default=None, help="slices per sound role (default 3)")
+    g.add_argument("--max-file-share", type=float, default=None, help="max share of hits from one file (0.4)")
+    g.add_argument("--allow-ref-files", action="store_true", help="allow slices from the refs' own files")
+    g.add_argument("--out", default="./out")
+    g.add_argument("--no-png", action="store_true")
+    g.add_argument("--audition", action="store_true",
+                   help="also write listen/<var>_x4.wav (seam check) and <var>_AB.wav (ref x2, then variation x2)")
+    g.add_argument("--no-update", action="store_true")
+    g.add_argument("--jobs", type=int, default=None)
+    g.set_defaults(func=cmd_generate)
+
+    rd = sub.add_parser("render", help="re-render a loop from its JSON recipe")
+    rd.add_argument("recipe")
+    rd.add_argument("--out", default=None, help="output wav (default: <recipe>.render.wav)")
+    rd.add_argument("--library", default=None, help="library root if it moved (sources resolved by relative path)")
+    rd.set_defaults(func=cmd_render)
     return ap
 
 

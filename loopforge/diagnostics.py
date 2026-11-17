@@ -135,3 +135,158 @@ def analysis_summary(a: LoopAnalysis) -> str:
     ]
     lines += [f"note        {n}" for n in a.notes]
     return "\n".join(lines)
+
+
+# --- generator evaluation -------------------------------------------------------
+
+def timbre_stats(analyses: list[LoopAnalysis]) -> dict[str, float]:
+    """Mean slice timbre over one or more analyses (hits weighted equally)."""
+    rows = [a.features for a in analyses if len(a.features)]
+    if not rows:
+        return {}
+    F = np.concatenate(rows)
+    from loopforge.models import FEATURE_INDEX as FI
+
+    return {
+        "centroid_hz": float(np.median(F[:, FI["centroid_hz"]])),
+        "band_high": float(np.mean(F[:, FI["band_high"]])),
+        "band_mid": float(np.mean(F[:, FI["band_mid"]])),
+        "decay_ms": float(np.median(F[:, FI["decay_ms"]])),
+        "flatness": float(np.median(F[:, FI["flatness"]])),
+    }
+
+
+def seam_ratio(x: np.ndarray) -> float:
+    """Jump across the loop point relative to the loop's own 99th-percentile sample-to-sample jump.
+
+    <= ~1 means the wrap is no rougher than the audio itself (no click)."""
+    x = np.atleast_2d(x)
+    d = np.abs(np.diff(x, axis=1))
+    typical = float(np.percentile(d, 99)) + 1e-9
+    return float(np.max(np.abs(x[:, 0] - x[:, -1])) / typical)
+
+
+def rhythm_metrics(out_analysis: LoopAnalysis, profile, space) -> dict:
+    """How the output's detected hits relate to the refs' rhythm profile.
+
+    - step_agreement: fraction of steps where hit/no-hit agrees with the refs' majority (onset prob >= 0.5)
+    - role_match: mean probability (from the refs) of the role each detected hit is closest to, at its step;
+      `role_chance` is what random roles would score
+    - accent_corr: correlation of per-step output level with the refs' expected level (role level + accent)
+    - role_mix_l1: L1 distance between output and reference role shares (0 = same mix, 2 = disjoint)
+    """
+    from loopforge.models import FEATURE_INDEX as FI
+
+    n = profile.n_steps
+    hit = np.zeros(n, bool)
+    level = np.full(n, np.nan)
+    match: list[float] = []
+    counts = np.zeros(len(profile.roles))
+    expected = np.array([
+        sum(profile.step_role_prob[o, r.id] * r.level_db for r in profile.roles) + profile.accent_db[o]
+        for o in range(n)
+    ])
+    if len(out_analysis.slices):
+        C = np.stack([r.centroid for r in profile.roles])
+        E = space.embed(out_analysis.features)
+        roles = np.argmin(((E[:, None, :] - C[None]) ** 2).sum(-1), axis=1)
+        for i, s in enumerate(out_analysis.slices):
+            o = s.step % n
+            r = int(roles[i])
+            counts[r] += 1
+            match.append(float(profile.step_role_prob[o, r]))
+            pk = float(out_analysis.features[i, FI["peak_db"]])
+            level[o] = pk if np.isnan(level[o]) else max(level[o], pk)
+            hit[o] = True
+    agree = float(np.mean(hit == (profile.onset_prob >= 0.5)))
+    ok = ~np.isnan(level)
+    acc = float(np.corrcoef(level[ok], expected[ok])[0, 1]) if ok.sum() > 2 and level[ok].std() > 0 else 0.0
+    shares = profile.role_shares
+    mix = counts / max(1.0, counts.sum())
+    return {
+        "step_agreement": round(agree, 3),
+        "role_match": round(float(np.mean(match)) if match else 0.0, 3),
+        "role_chance": round(float((shares**2).sum()), 3),
+        "accent_corr": round(acc, 3),
+        "role_mix_l1": round(float(np.abs(mix - shares).sum()), 3),
+    }
+
+
+def evaluate_output(audio: np.ndarray, out_analysis: LoopAnalysis, recipe, profile, ref_timbre: dict,
+                    space=None) -> dict:
+    from collections import Counter
+
+    files = Counter(e.source_rel for e in recipe.events)
+    t = out_analysis.tempo
+    out_t = timbre_stats([out_analysis])
+    return {
+        "detected_bpm": round(t.bpm, 3),
+        "detected_method": t.method,
+        "detected_loop": t.is_loop,
+        "bpm_error": round(abs(t.bpm - recipe.bpm), 3),
+        "length_samples": int(audio.shape[1]),
+        "length_exact": int(audio.shape[1]) == recipe.n_samples,
+        "seam_ratio": round(seam_ratio(audio), 3),
+        "peak_dbfs": round(20 * np.log10(float(np.abs(audio).max()) + 1e-12), 2),
+        "rms_dbfs": round(20 * np.log10(float(np.sqrt(np.mean(audio.astype(np.float64) ** 2))) + 1e-12), 2),
+        "events": len(recipe.events),
+        "hits_per_bar": round(len(out_analysis.slices) / max(1e-9, recipe.bars), 2),
+        "ref_hits_per_bar": round(profile.hits_per_template / recipe.bars, 2),
+        **(rhythm_metrics(out_analysis, profile, space) if space is not None else {}),
+        "timbre": {k: round(v, 3) for k, v in out_t.items()},
+        "ref_timbre": {k: round(v, 3) for k, v in ref_timbre.items()},
+        "files_used": len(files),
+        "max_file_share": round(max(files.values()) / max(1, len(recipe.events)), 3),
+        "slices_used": len({(e.source_rel, e.slice_index) for e in recipe.events}),
+    }
+
+
+def generation_report(rows: list[dict], profile, refs: list[str], args_desc: str) -> str:
+    rt = rows[0]["metrics"]["ref_timbre"] if rows else {}
+    lines = [
+        "# loopforge generation report",
+        "",
+        f"- command: `{args_desc}`",
+        f"- refs: {', '.join(refs)}",
+        f"- tempo {profile.bpm:g} BPM, {profile.n_steps} steps, sr {profile.sr}",
+        f"- ref hits/bar {profile.hits_per_template / (profile.n_steps / 16):.1f}; ref timbre: centroid "
+        f"{rt.get('centroid_hz', 0):.0f} Hz, high-band {rt.get('band_high', 0):.2f}, decay {rt.get('decay_ms', 0):.0f} ms",
+        "",
+        "## Roles found in the refs",
+        "",
+        "| id | name | share | centroid Hz | decay ms | attack ms | high band | level dB | rings |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in profile.roles:
+        d = r.to_dict()
+        lines.append(f"| {d['id']} | {d['name']} | {d['share']:.2f} | {d['centroid_hz']:.0f} | {d['decay_ms']:.0f} | "
+                     f"{d['attack_ms']:.1f} | {d['band_high']:.2f} | {d['level_db']:.1f} | {'yes' if d['long'] else ''} |")
+    lines += [
+        "",
+        "## Variations",
+        "",
+        "| file | seed | detected BPM | exact length | seam | hits/bar | step agree | role match | accent corr | "
+        "role mix L1 | centroid Hz | high band | decay ms | files | max file share | template |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        m = r["metrics"]
+        t = m["timbre"]
+        lines.append(
+            f"| {r['file']} | {r['seed']} | {m['detected_bpm']:g} ({m['detected_method']}) | "
+            f"{'yes' if m['length_exact'] else 'NO'} | {m['seam_ratio']:.2f} | {m['hits_per_bar']:.1f} | "
+            f"{m.get('step_agreement', 0):.2f} | {m.get('role_match', 0):.2f} (chance {m.get('role_chance', 0):.2f}) | "
+            f"{m.get('accent_corr', 0):.2f} | {m.get('role_mix_l1', 0):.2f} | "
+            f"{t.get('centroid_hz', 0):.0f} | {t.get('band_high', 0):.2f} | "
+            f"{t.get('decay_ms', 0):.0f} | {m['files_used']} | {m['max_file_share']:.2f} | {r['template']} |"
+        )
+    lines += [
+        "",
+        "seam = jump across the loop point / 99th-percentile sample-to-sample jump inside the loop (<= 1: no click).",
+        "step agree = fraction of 16th steps where hit / no-hit matches the refs' majority.",
+        "role match = mean ref probability of each detected hit's role at its step (chance = random roles).",
+        "accent corr = correlation of per-step output level with the refs' expected level.",
+        "role mix L1 = distance between output and ref role shares (0 = same mix, 2 = disjoint).",
+        "All metrics come from re-analysing the rendered WAV with the same analyzer used on the refs.",
+    ]
+    return "\n".join(lines) + "\n"

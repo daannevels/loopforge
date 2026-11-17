@@ -10,6 +10,8 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - `uv run loopforge analyze <loop.wav> [--bpm X] [--out-dir D] [--json]`
 - `uv run loopforge index <library> [--jobs N] [--cache PATH]`
 - `uv run loopforge neighbors <loop|one-shot> --library <dir> [--k 10] [--slice i ...] [--export DIR]`
+- `uv run loopforge generate --refs a.wav b.wav --library <dir> --bars 2 --variations 8 --similarity 0.7 --seed 42 --out ./out [--audition]`
+- `uv run loopforge render <var.json> [--out x.wav] [--library <moved root>]`
 
 ## Conventions
 - Audio inside the engine is float32 shaped `(channels, samples)`; mono analysis via `audio_io.to_mono`.
@@ -59,13 +61,39 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - **Stereo**: slices keep their original stereo image; mono sources are centred. Features use mono sum.
 - **Swing in output**: straight unless `--swing` is given (detected swing is reported, and used to
   snap swung source material to the grid).
-- **Selection** (M3, planned): per-role palettes of 2–4 slices instead of a new sample on every step.
+- **Generator pipeline** (`generator/`): `profile.build_profile` → `pattern.generate_pattern` →
+  `select.build_palettes` + `assign_slices` → `run.generate_one` builds a `Recipe` → `recipe.render_recipe`.
+  The renderer takes an injected `SliceLoader` (no I/O in the engine); `generate` and `render` use the same
+  code path, so a recipe re-renders bit-identically.
+- **Roles**: k-means over all ref hits in the *generation* timbre space (envelope ×3, MFCC ×0.5 —
+  `GenParams.timbre_group_weights`; closed vs. open hats is mostly decay). Pick the LARGEST k (≤6) with
+  silhouette ≥ 0.6×best; clusters < 3% of hits fold into the nearest. Role `long` = median decay > 120 ms.
+- **Profile**: refs are cut (or tiled) into templates of the output length; per step: onset prob, role
+  distribution, accent (dB vs. role level). Flams (2nd hit ≥0.1 step later on the same step) are kept as
+  sub-hits.
+- **Pattern**: pick a random template; per-step mutation rate 0.6·(1−sim) resamples hit/role from
+  sim·profile + (1−sim)·metric prior; shifts ±1 step; density kept within ±(5%+30%·(1−sim)); velocity =
+  role level + step accent + noise. At sim=1 the rhythm equals a template (novelty guard comes in M4).
+- **Selection**: per role, diverse top-k (k = 4 + (1−sim)·28) around the role centroid with a fit penalty
+  (gain needed > 6 dB; ringing roles prefer slices at least as long as the role's decay). Palette of 3
+  sampled with weights exp(−Δd/τ); events cycle the palette (weights .55/.3/.15), never the same slice
+  back-to-back, ≤ floor(40%) of events per source file; backups used when constraints block the palette.
+- **Assembly**: position = round((step + swing·odd + sub_offset)·step_samples) — no drift. Short roles
+  play until the next hit + 3 ms (4 ms fade-out underneath it); long roles ring up to 1 beat. 1 ms fade-in,
+  gain = target − slice peak (±12 dB). Tails past the end wrap to the start (seamless). Normalise to the
+  refs' mean RMS, then tanh soft-limit above 0.7×(−1 dBFS). Output = refs' (most common) sample rate.
+- **Evaluation** (`diagnostics.evaluate_output`): the rendered WAV is re-analysed with the same analyzer:
+  detected BPM, exact length, seam ratio, hits/bar, step agreement, role match vs. chance, accent corr,
+  role-mix L1, timbre stats, file usage → `report.md` + recipe `metrics`.
 
 ## Known limitations
 - Non-loop files with flams ~0.3 step after the beat can be read with flipped even/odd parity
   (shows up as swing ≈ 0.3). Trimmed loops are unaffected (phase fixed at file start).
 - Downbeat of non-loop files is not detected (grid phase only).
+- Library slices end at the next onset of their source loop, so long sounds (open hats) from dense loops are
+  pre-truncated; selection prefers longer candidates for ringing roles but cannot recover cut tails.
+- Re-analysing outputs that contain flams reports spurious swing (~0.1–0.15); the output grid is straight.
 
 ## Milestones
-M1 analysis + `analyze` ✅ · M2 library index + `neighbors` ✅ · M3 generator v1 · M4 similarity/novelty/
+M1 analysis + `analyze` ✅ · M2 library index + `neighbors` ✅ · M3 generator v1 ✅ · M4 similarity/novelty/
 variations · M5 Gradio listening UI.

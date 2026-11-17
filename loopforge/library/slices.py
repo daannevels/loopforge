@@ -26,3 +26,25 @@ def audition_chain(clips: list[np.ndarray], sr: int, gap_s: float = 0.25) -> np.
     for c in clips:
         parts += [to_stereo(c), gap]
     return np.concatenate(parts, axis=1) if parts else np.zeros((2, 0), np.float32)
+
+
+def recipe_loader(base_dir: str | None = None):
+    """SliceLoader for recipes: reads the event's source region, stereo, resampled to out_sr.
+
+    If `base_dir` is given, sources are resolved as base_dir/source_rel (library moved);
+    otherwise the absolute `source` path is used. Regions are cached per call site.
+    """
+    from pathlib import Path
+
+    cache: dict[tuple[str, int, int, int], np.ndarray] = {}
+
+    def load(ev, out_sr: int) -> np.ndarray:
+        path = str(Path(base_dir) / ev.source_rel) if base_dir else ev.source
+        key = (path, ev.src_start, ev.src_end, out_sr)
+        if key not in cache:
+            x, sr = load_region(path, ev.src_start, ev.src_end)
+            x = to_stereo(x)
+            cache[key] = resample(x, sr, out_sr) if sr != out_sr else x
+        return cache[key]
+
+    return load

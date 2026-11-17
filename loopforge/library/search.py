@@ -90,9 +90,9 @@ class NearestNeighbors:
     def __len__(self) -> int:
         return len(self.E)
 
-    def distances(self, queries: np.ndarray) -> np.ndarray:
-        """(m, n) Euclidean distances from raw query vectors to every indexed slice."""
-        Q = self.space.embed(queries).astype(np.float64)
+    def distances(self, queries: np.ndarray, embedded: bool = False) -> np.ndarray:
+        """(m, n) Euclidean distances from query vectors (raw features, or already embedded) to every slice."""
+        Q = (np.atleast_2d(queries) if embedded else self.space.embed(queries)).astype(np.float64)
         d2 = (Q**2).sum(1)[:, None] + self._sq[None, :] - 2.0 * Q @ self.E.T.astype(np.float64)
         return np.sqrt(np.maximum(d2, 0.0))
 
@@ -119,11 +119,12 @@ class NearestNeighbors:
         max_per_group: int = 2,
         exclude: np.ndarray | None = None,
         min_separation: float = 0.0,
+        embedded: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         """k nearest for ONE query, with at most `max_per_group` results per group (e.g. source file)
         and optionally skipping results closer than `min_separation` to an already chosen one
         (near-duplicate repeats of the same hit inside a loop)."""
-        D = self.distances(np.atleast_2d(query))[0]
+        D = self.distances(np.atleast_2d(query), embedded=embedded)[0]
         if exclude is not None and exclude.any():
             D[exclude] = np.inf
         chosen: list[int] = []

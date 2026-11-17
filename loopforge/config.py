@@ -55,8 +55,53 @@ class AnalysisParams:
 
 
 @dataclass(frozen=True)
+class GenParams:
+    bars: int = 2
+    similarity: float = 0.7  # 1 = stay close to the refs, 0 = loose
+    swing: float = 0.0  # output swing (delay of odd 16ths, in steps); straight by default
+    bpm: float | None = None  # override output tempo (default: refs' tempo)
+
+    # Roles (clusters of reference hits)
+    max_roles: int = 6
+    min_silhouette: float = 0.15  # below this, all ref hits form one role
+    role_rel_silhouette: float = 0.6  # pick the largest k with silhouette >= this * best
+    role_min_share: float = 0.03  # smaller clusters are folded into their nearest role
+
+    # Timbre space for role clustering + selection: decay/attack matter more than in the
+    # generic search space (closed vs. open hats), MFCC detail less.
+    timbre_group_weights: tuple[tuple[str, float], ...] = (("envelope", 3.0), ("mfcc", 0.5))
+
+    # Selection
+    palette_size: int = 3  # slices per role (main sound + variations)
+    palette_weights: tuple[float, ...] = (0.55, 0.3, 0.15, 0.1)  # pick probability by palette rank
+    k_min: int = 4  # candidate pool per role at similarity 1
+    k_max: int = 32  # ... at similarity 0
+    candidates_per_file: int = 2
+    max_file_share: float = 0.4  # max fraction of events from one source file
+    level_free_db: float = 6.0  # gain needed up to this is free ...
+    level_penalty: float = 0.05  # ... beyond it, distance += this per dB
+    short_penalty: float = 1.0  # ringing roles: distance += this * (1 - slice_dur / role_decay)
+    min_slice_rms_db: float = -50.0
+    min_slice_ms: float = 15.0
+
+    # Assembly
+    gain_clamp_db: float = 12.0
+    fade_in_ms: float = 1.0
+    fade_out_ms: float = 4.0
+    overlap_ms: float = 3.0  # short hits ring this far into the next hit (fade-out underneath it)
+    long_role_decay_ms: float = 120.0  # roles with longer decay may ring past the next hit
+    max_ring_beats: float = 1.0
+    limiter_ceiling_db: float = -1.0
+    limiter_knee: float = 0.7  # soft-limit above this fraction of the ceiling
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Config:
     analysis: AnalysisParams = field(default_factory=AnalysisParams)
+    gen: GenParams = field(default_factory=GenParams)
 
     def to_dict(self) -> dict:
         return asdict(self)
