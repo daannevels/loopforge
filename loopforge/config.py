@@ -85,6 +85,10 @@ class GenParams:
 
     # Selection
     palette_size: int = 1  # library samples per sound type (1 = one open hat, one closed hat, ...)
+    # sound types (role base names: closed, open, shaker, perc, clap) that switch between several samples
+    # within one loop, changing per hit; the others keep one sample
+    mix_types: tuple[str, ...] = ("perc",)
+    mix_size: int = 3  # samples per mixed sound type
     palette_weights: tuple[float, ...] = (0.55, 0.3, 0.15, 0.1)  # pick probability by palette rank
     k_min: int = 4  # candidate pool per role at similarity 1
     k_max: int = 32  # ... at similarity 0

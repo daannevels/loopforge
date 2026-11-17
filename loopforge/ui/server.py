@@ -32,7 +32,8 @@ from loopforge.service import GenRequest, RefLoop, load_ref, run_generation, tem
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 300 * 1024 * 1024
 MAX_REFS = 3
-SETTING_KEYS = ("bars", "variations", "seed", "seed_lock", "palette_size", "bpm")
+SETTING_KEYS = ("bars", "variations", "seed", "seed_lock", "mix_types", "mix_size", "bpm")
+MIX_TYPES = ("closed", "open", "shaker", "perc", "clap")
 
 
 def default_workspace() -> Path:
@@ -57,8 +58,8 @@ class App:
         self.lock = threading.RLock()
         self.refs: dict[str, RefLoop] = {}
         self.ref_order: list[str] = []
-        self.settings: dict = {"bars": 2, "variations": 8, "seed": 42, "seed_lock": False, "palette_size": 1,
-                               "bpm": None, "library": None}
+        self.settings: dict = {"bars": 2, "variations": 8, "seed": 42, "seed_lock": False, "mix_types": ["perc"],
+                               "mix_size": 3, "bpm": None, "library": None}
         self.index = {"state": "none", "done": 0, "total": 0, "current": "", "stats": None, "error": None}
         self.job = {"state": "idle", "log": [], "rows": [], "run": None, "error": None, "total": 0, "started": None}
         self._stop = False
@@ -219,13 +220,15 @@ class App:
                 raise ValueError(err)
             if not s.get("seed_lock"):
                 s["seed"] = random.randrange(1_000_000)  # every run picks new sounds
-            gp = replace(GenParams(), mode="simple", similarity=1.0, swing=0.0, bars=int(s["bars"]),
-                         palette_size=int(s["palette_size"]), bpm=float(s["bpm"]) if s.get("bpm") else None)
+            mix = tuple(t for t in (s.get("mix_types") or []) if t in MIX_TYPES)
+            gp = replace(GenParams(), mode="simple", similarity=1.0, swing=0.0, bars=int(s["bars"]), palette_size=1,
+                         mix_types=mix, mix_size=max(2, min(4, int(s.get("mix_size") or 3))),
+                         bpm=float(s["bpm"]) if s.get("bpm") else None)
             run = time.strftime("%Y-%m-%d_%H%M%S")
             req = GenRequest(refs=refs, library=s["library"], out_dir=self.ws / "runs" / run, gp=gp,
                              aparams=self.aparams, variations=int(s["variations"]), seed=int(s["seed"]),
                              jobs=self.jobs, png=False, update_index=True,
-                             command=f"ui: bars={gp.bars} palette={gp.palette_size} seed={s['seed']}")
+                             command=f"ui: bars={gp.bars} mix={','.join(mix) or 'none'}x{gp.mix_size} seed={s['seed']}")
             self._save_settings()
             self._stop = False
             self.job = {"state": "running", "log": [], "rows": [], "run": run, "error": None,

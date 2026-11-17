@@ -294,3 +294,27 @@ def test_later_variations_pick_most_different_sample():
     p = GenParams(diversity_top_frac=0.2)
     # sample 0 was used before: the pick must be the candidate farthest from it (row 2)
     assert {_pick_most_different([1, 2, 3, 4], [0], FakeNN(), rng, p) for _ in range(20)} == {2}
+
+
+def test_mix_switches_vary_only_the_chosen_sound_types(world):
+    from loopforge.generator.select import role_type
+
+    pr = world["profile"]
+    mixed_type = next(role_type(r.name) for r in pr.roles if role_type(r.name) != "open")
+    gp = GenParams(bars=2, mix_types=(mixed_type,), mix_size=3)
+    recipe, _ = generate_one(pr, world["table"], world["nn"], gp, 4, world["exclude"], recipe_loader())
+    by_role: dict[str, list] = {}
+    for e in sorted(recipe.events, key=lambda e: e.position):
+        by_role.setdefault(e.role, []).append((e.source_rel, e.slice_index))
+    for role, seq in by_role.items():
+        if role_type(role) == mixed_type:
+            assert 2 <= len(set(seq)) <= 3, role  # switches between several samples ...
+            assert all(a != b for a, b in zip(seq, seq[1:])), role  # ... and never the same twice in a row
+        else:
+            assert len(set(seq)) == 1, role  # everything else keeps one sample
+    off, _ = generate_one(pr, world["table"], world["nn"], GenParams(bars=2, mix_types=()), 4, world["exclude"],
+                          recipe_loader())
+    per_role: dict[str, set] = {}
+    for e in off.events:
+        per_role.setdefault(e.role, set()).add((e.source_rel, e.slice_index))
+    assert all(len(v) == 1 for v in per_role.values())

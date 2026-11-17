@@ -21,9 +21,9 @@ A JUCE VST3/AU plugin for Ableton Live / FL Studio is the planned next phase.
    - the clap on beats 2 and 4 is detected separately and becomes its own type.
 4. **Generation:**
    - **Rhythm:** a section of a reference is copied hit for hit, including its accents and flams.
-   - **Sound choice:** each sound type gets one library sample per loop (or 2–4 with "Palette"). Every
-     variation deliberately picks the samples that sound most different from those used by earlier
-     variations.
+   - **Sound choice:** each sound type gets one library sample per loop. Types switched on under "Mix"
+     (default: perc) get 2–4 samples that alternate per hit. Every variation deliberately picks the samples
+     that sound most different from those used by earlier variations.
    - **Claps:** a clap is only replaced by a library clap. Claps that sound like the reference's own clap
      are skipped. Hats are never taken from a spot where a clap tail rings through.
    - **Assembly:** hits are placed sample-accurately, with short fades and overlaps. Hits that were cut short
@@ -33,8 +33,10 @@ A JUCE VST3/AU plugin for Ableton Live / FL Studio is the planned next phase.
 
 ## The app
 - **Inputs:** drop in reference loops and choose your library folder.
-- **Controls:** knobs for Variations (loops per run) and Palette (samples per sound type), Length
-  (1/2/4 bars), and a Seed that is random each run, with a Lock to repeat a run exactly.
+- **Controls:** a knob for Variations (loops per run); "Mix" switches per sound type (closed hat, open hat,
+  shaker, perc, clap) that make that sound alternate between several samples within a loop, with a
+  "Mix size" knob (2–4 samples); all other sound types use one sample. Also Length (1/2/4 bars) and a Seed
+  that is random each run, with a Lock to repeat a run exactly.
 - **Results:** each loop gets a card with a waveform and hit markers coloured by sound type. You can play it
   seamlessly looped, A/B it against the reference in time, star it as a favourite, or drag it into your DAW.
 - **Run history:** earlier runs and favourites are kept in `~/Loopforge`.

@@ -176,9 +176,9 @@ def same_type_candidates(profile: RefProfile, role_id: int, table: SliceTable, n
     # hats & co never come from a clap or from a slice carrying a clap's tail (that brings the clap along)
     ok = np.isfinite(own) & (nearest_role == role_id) & gain_ok & decay_ok & near & ~is_clap & ~tainted
     rows = np.nonzero(ok)[0]
-    if len(rows) < p.palette_size:
+    if len(rows) < max(p.palette_size, p.mix_size):
         finite = np.nonzero(np.isfinite(own) & ~is_clap & ~tainted)[0]
-        rows = finite[np.argsort(own[finite], kind="stable")[: max(p.palette_size, 4)]]
+        rows = finite[np.argsort(own[finite], kind="stable")[: max(p.palette_size, p.mix_size, 4)]]
     rows = rows[np.argsort(own[rows], kind="stable")]
     return _cap_per_file(rows, table, p)
 
@@ -215,7 +215,7 @@ def choose_role_samples(
     for r in sorted({e.role for e in events}):
         pool = [int(x) for x in same_type_candidates(profile, r, table, nn, exclude, p)]
         picks: list[int] = []
-        for _ in range(min(p.palette_size, len(pool))):
+        for _ in range(min(samples_for_role(profile.roles[r].name, p), len(pool))):
             def f(row: int) -> int:
                 return int(table.file_idx[row])
 
@@ -255,15 +255,34 @@ def _pick_most_different(cand: list[int], used: list[int], nn: NearestNeighbors,
     return cand[int(top[int(rng.integers(len(top)))])]
 
 
+def role_type(name: str) -> str:
+    """Base sound type of a role name: 'perc3' -> 'perc', 'closed1' -> 'closed', 'clap' -> 'clap'."""
+    return name.rstrip("0123456789")
+
+
+def samples_for_role(name: str, p: GenParams) -> int:
+    """How many library samples a sound type gets in one loop: `mix_size` if switched on in `mix_types`."""
+    return max(1, p.mix_size) if role_type(name) in p.mix_types else max(1, p.palette_size)
+
+
 def assign_palette(events: list[PatternEvent], choice: dict[int, list[int]], rng: np.random.Generator,
-                   p: GenParams) -> list[int]:
-    """Row per event: palette rank 0 is the main sound; with a palette > 1 the others are mixed in
-    (weights `palette_weights`). Repeats are allowed, like a drum machine."""
+                   p: GenParams, mixed_roles: set[int] | None = None) -> list[int]:
+    """Row per event. Mixed sound types (`mixed_roles`) switch sample per hit: picked evenly at random,
+    never the same one twice in a row for that sound type, so the change is audible. Otherwise palette
+    rank 0 is the main sound and extra samples are mixed in by `palette_weights` (repeats allowed)."""
+    mixed_roles = mixed_roles or set()
+    last: dict[int, int] = {}
     out = []
     for e in events:
         pal = choice[e.role]
         if len(pal) == 1:
             out.append(pal[0])
+            continue
+        if e.role in mixed_roles:
+            cand = [x for x in pal if x != last.get(e.role)] or pal
+            row = cand[int(rng.integers(len(cand)))]
+            last[e.role] = row
+            out.append(row)
             continue
         w = np.array([p.palette_weights[min(i, len(p.palette_weights) - 1)] for i in range(len(pal))])
         out.append(pal[int(rng.choice(len(pal), p=w / w.sum()))])

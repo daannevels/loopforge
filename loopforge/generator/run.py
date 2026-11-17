@@ -8,7 +8,14 @@ from loopforge.config import ANALYZER_VERSION, GenParams
 from loopforge.generator.pattern import generate_pattern, generate_simple_pattern
 from loopforge.generator.profile import RefProfile
 from loopforge.generator.recipe import Recipe, RecipeEvent, SliceLoader, finalize, mix_events
-from loopforge.generator.select import RunMemory, assign_palette, assign_slices, build_palettes, choose_role_samples
+from loopforge.generator.select import (
+    RunMemory,
+    assign_palette,
+    assign_slices,
+    build_palettes,
+    choose_role_samples,
+    role_type,
+)
 from loopforge.library.index import SliceTable
 from loopforge.library.search import NearestNeighbors
 from loopforge.models import FEATURE_INDEX
@@ -54,7 +61,8 @@ def generate_one(
     if simple:
         pattern, template = generate_simple_pattern(profile, rng, keep_flams=p.keep_flams)
         choice = choose_role_samples(profile, pattern, table, nn, rng, p, exclude, memory)
-        rows = assign_palette(pattern, choice, rng, p)
+        mixed = {r.id for r in profile.roles if role_type(r.name) in p.mix_types}
+        rows = assign_palette(pattern, choice, rng, p, mixed_roles=mixed)
         swing = 0.0
     else:
         pattern, template = generate_pattern(profile, p.similarity, rng, p)

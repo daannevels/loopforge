@@ -63,6 +63,16 @@
         </div>
         <div class="engine-side">
           <div class="field">
+            <label>Mix <span class="label-hint">sound types that change sample per hit</span></label>
+            <div class="toggles" id="mix-toggles" role="group" aria-label="Sound types that switch samples">
+              <button type="button" data-t="closed" aria-pressed="false">Closed hat</button>
+              <button type="button" data-t="open" aria-pressed="false">Open hat</button>
+              <button type="button" data-t="shaker" aria-pressed="false">Shaker</button>
+              <button type="button" data-t="perc" aria-pressed="true">Perc</button>
+              <button type="button" data-t="clap" aria-pressed="false">Clap</button>
+            </div>
+          </div>
+          <div class="field">
             <label>Length</label>
             <div class="seg" id="seg-bars" role="radiogroup" aria-label="Loop length in bars">
               <button data-v="1" role="radio">1 bar</button><button data-v="2" role="radio">2 bars</button><button data-v="4" role="radio">4 bars</button>

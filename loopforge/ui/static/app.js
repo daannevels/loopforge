@@ -142,9 +142,16 @@ function saveSettings() {
 }
 function currentSettings() {
   return {
-    variations: knobs.variations.get(), palette_size: knobs.palette.get(), bars: barsValue,
+    variations: knobs.variations.get(), mix_size: knobs.palette.get(), mix_types: mixTypes(), bars: barsValue,
     seed: parseInt($("#seed").value || "0", 10), seed_lock: $("#seed-lock").checked,
   };
+}
+
+function mixTypes() {
+  return [...document.querySelectorAll("#mix-toggles button")].filter(b => b.getAttribute("aria-pressed") === "true").map(b => b.dataset.t);
+}
+function setMixTypes(list) {
+  document.querySelectorAll("#mix-toggles button").forEach(b => b.setAttribute("aria-pressed", String(list.includes(b.dataset.t))));
 }
 
 let barsValue = 2;
@@ -418,7 +425,8 @@ function renderStatus() {
 }
 
 function applySettings(s) {
-  knobs.variations.set(s.variations); knobs.palette.set(s.palette_size); setBars(+s.bars || 2);
+  knobs.variations.set(s.variations); knobs.palette.set(s.mix_size || 3); setBars(+s.bars || 2);
+  setMixTypes(s.mix_types || ["perc"]);
   $("#seed").value = s.seed; $("#seed-lock").checked = !!s.seed_lock;
 }
 
@@ -485,11 +493,15 @@ function init() {
     label: "Variations", min: 1, max: 16, step: 1, value: 8, def: 8, fmt: v => String(v), help: () => "loops per run, all different sounds", onChange: saveSettings,
   });
   knobs.palette = makeKnob($("#k-palette"), {
-    label: "Palette", min: 1, max: 4, step: 1, value: 1, def: 1, fmt: v => v + (v === 1 ? " sample" : " samples"),
-    help: v => v === 1 ? "one sample per sound type" : "per sound type, mixed", onChange: saveSettings,
+    label: "Mix size", min: 2, max: 4, step: 1, value: 3, def: 3, fmt: v => v + " samples",
+    help: () => "per switched-on sound type", onChange: saveSettings,
   });
   document.querySelectorAll("#seg-bars button").forEach(b => (b.onclick = () => { setBars(+b.dataset.v); saveSettings(); }));
   $("#seed-lock").addEventListener("change", saveSettings);
+  document.querySelectorAll("#mix-toggles button").forEach(b => (b.onclick = () => {
+    b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true"));
+    saveSettings();
+  }));
   $("#seed").addEventListener("change", saveSettings);
   $("#btn-dice").onclick = () => { $("#seed").value = Math.floor(Math.random() * 100000); saveSettings(); };
 

@@ -186,8 +186,10 @@ def cmd_neighbors(args: argparse.Namespace) -> int:
 def _gen_params(args: argparse.Namespace):
     from loopforge.config import GenParams
 
-    kw = {k: getattr(args, k) for k in ("bars", "similarity", "swing", "bpm", "palette_size", "max_file_share", "mode")
-          if getattr(args, k, None) is not None}
+    kw = {k: getattr(args, k) for k in ("bars", "similarity", "swing", "bpm", "palette_size", "max_file_share", "mode",
+                                         "mix_size") if getattr(args, k, None) is not None}
+    if getattr(args, "mix", None) is not None:
+        kw["mix_types"] = tuple(x for x in args.mix if x != "none")
     return GenParams(**kw)
 
 
@@ -309,6 +311,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--palette-size", type=int, default=None,
                    help="library samples per sound type (default 1 = one open hat, one closed hat, ...)")
     g.add_argument("--max-file-share", type=float, default=None, help="max share of hits from one file (0.4)")
+    g.add_argument("--mix", nargs="+", choices=["closed", "open", "shaker", "perc", "clap", "none"], default=None,
+                   help="sound types that switch between several samples within a loop (default: perc; 'none' = off)")
+    g.add_argument("--mix-size", type=int, default=None, help="samples per mixed sound type (default 3)")
     g.add_argument("--allow-ref-files", action="store_true", help="allow slices from the refs' own files")
     g.add_argument("--out", default="./out")
     g.add_argument("--no-png", action="store_true")

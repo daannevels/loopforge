@@ -73,8 +73,8 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   sub-hits.
 - **Product decision (user, final)**: only "simple" is exposed. Rhythm = an exact copy of a reference
   section (same steps, sound type and level per hit, the ref's own flams; empty steps stay empty). No swing,
-  no similarity knob (fixed 1.0). UI/CLI expose Variations, Palette, Length, Seed (random per run unless
-  locked). `creative` (M3 mutation/palette/swing engine) stays in code, hidden (`--mode creative`).
+  no similarity knob (fixed 1.0). UI/CLI expose Variations, Mix switches + Mix size, Length, Seed (random per
+  run unless locked). `creative` (M3 mutation/palette/swing engine) stays in code, hidden (`--mode creative`).
 - **Simple-mode sound choice** (`select.same_type_candidates` + `choose_role_samples`): a library hit is
   "the same sound type" as ref role R when it is nearer to R's centroid than to any other ref role, within
   2× the spread (90th-pct radius) of the ref's own R hits, decays at 0.6–2× R's decay (a fast-dying "open
@@ -84,6 +84,12 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   sample between roles. Variation 1 picks uniformly at random; later ones pick at random among the 20% of
   candidates that are MOST different (max-min timbre distance) from what earlier variations used for that
   sound type (`_pick_most_different`). 10% was tested: samples differ more but whole loops less.
+- **Mix switches** (user request): `GenParams.mix_types` (default `("perc",)`) lists role base types
+  (`select.role_type`: 'perc3' → 'perc'; closed/open/shaker/perc/clap) that use `mix_size` (2–4, default 3)
+  samples per loop and switch per hit: evenly at random, never the same sample twice in a row for that type
+  (`assign_palette(mixed_roles=...)`). All other types keep `palette_size` (UI: always 1). UI: toggle chips
+  "Mix" + knob "Mix size" (replaces the Palette knob). CLI: `--mix perc shaker closed` / `--mix none`,
+  `--mix-size`.
 - **Seeds**: the run seed (random per run unless locked) derives one independent random seed per variation
   (`rng(run_seed).choice(1e6, n, replace=False)`); recipes store both `seed` and `run_seed`. Adjacent seed
   numbers were never "similar" for the RNG — the user's "too similar" was the narrow pool + pure random picks.
