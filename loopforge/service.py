@@ -151,14 +151,18 @@ def run_generation(
     from loopforge.generator.select import RunMemory
 
     memory = RunMemory.new()  # simple mode: each variation prefers samples/files not used before
+    # one independent, random-looking seed per variation, derived from the run seed (so a locked run
+    # seed still reproduces the whole run)
+    seeds = [int(x) for x in np.random.default_rng(req.seed).choice(1_000_000, size=req.variations, replace=False)]
     for v in range(req.variations):
         if should_stop and should_stop():
             log("stopped")
             break
-        seed = req.seed + v
+        seed = seeds[v]
         recipe, audio = generate_one(profile, table, nn, gp, seed, exclude, loader, refs_info, __version__,
                                      memory=memory)
         stem = f"var_{v + 1:02d}_seed{seed}"
+        recipe.run_seed = req.seed
         wav = write_wav(out / f"{stem}.wav", audio, recipe.sr)
         oa = analyze_loop(audio, recipe.sr, name=wav.name, params=req.aparams)
         recipe.metrics = evaluate_output(audio, oa, recipe, profile, ref_t, space)

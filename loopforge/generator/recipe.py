@@ -64,6 +64,7 @@ class Recipe:
     analyzer_version: int = 0
     loopforge_version: str = ""
     mode: str = "creative"
+    run_seed: int | None = None  # seed of the whole run (variation seeds are derived from it)
     recipe_version: int = RECIPE_VERSION
     metrics: dict = field(default_factory=dict)
 

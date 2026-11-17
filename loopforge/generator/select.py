@@ -7,7 +7,7 @@ Constraints: no slice twice in a row, at most `max_file_share` of events per fil
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -135,10 +135,11 @@ class RunMemory:
 
     rows: set[int]
     files: set[int]
+    by_role: dict[int, list[int]] = field(default_factory=dict)  # samples earlier variations used, per type
 
     @classmethod
     def new(cls) -> "RunMemory":
-        return cls(set(), set())
+        return cls(set(), set(), {})
 
 
 def same_type_candidates(profile: RefProfile, role_id: int, table: SliceTable, nn: NearestNeighbors,
@@ -212,15 +213,30 @@ def choose_role_samples(
             cand = next((t for t in tiers if t), [])
             if not cand:
                 break
-            row = cand[int(rng.integers(len(cand)))]
+            row = _pick_most_different(cand, memory.by_role.get(r, []) + picks, nn, rng, p)
             picks.append(row)
             taken_rows.add(row)
             taken_files.add(f(row))
         out[r] = picks
-    for rows in out.values():
+    for r, rows in out.items():
         memory.rows.update(rows)
         memory.files.update(int(table.file_idx[x]) for x in rows)
+        memory.by_role.setdefault(r, []).extend(rows)
     return out
+
+
+def _pick_most_different(cand: list[int], used: list[int], nn: NearestNeighbors, rng: np.random.Generator,
+                         p: GenParams) -> int:
+    """Random pick among the candidates that sound MOST different from the samples already used for this
+    sound type (largest distance to the nearest used one). With nothing used yet: uniformly random."""
+    if not used:
+        return cand[int(rng.integers(len(cand)))]
+    C = nn.E[cand].astype(np.float64)
+    U = nn.E[used].astype(np.float64)
+    novelty = np.sqrt(((C[:, None, :] - U[None, :, :]) ** 2).sum(-1)).min(axis=1)
+    k = max(1, int(np.ceil(len(cand) * p.diversity_top_frac)))
+    top = np.argsort(-novelty, kind="stable")[:k]
+    return cand[int(top[int(rng.integers(len(top)))])]
 
 
 def assign_palette(events: list[PatternEvent], choice: dict[int, list[int]], rng: np.random.Generator,

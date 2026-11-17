@@ -196,11 +196,20 @@ def test_cli_generate_and_render(world, tmp_path, capsys):
             "--variations", "2", "--seed", "5", "--out", str(out), "--no-update", "--audition"]
     assert main(args) == 0
     assert (out / "report.md").is_file() and (out / "profile.json").is_file()
-    wav, js = out / "var_01_seed5.wav", out / "var_01_seed5.json"
-    assert wav.is_file() and js.is_file() and (out / "var_01_seed5.png").is_file()
-    assert (out / "listen" / "var_01_seed5_x4.wav").is_file() and (out / "listen" / "var_01_seed5_AB.wav").is_file()
+    wavs = sorted(out.glob("var_*.wav"))
+    assert len(wavs) == 2
+    wav = wavs[0]
+    js, stem = wav.with_suffix(".json"), wav.stem
+    assert js.is_file() and wav.with_suffix(".png").is_file()
+    assert (out / "listen" / f"{stem}_x4.wav").is_file() and (out / "listen" / f"{stem}_AB.wav").is_file()
     d = json.loads(js.read_text())
-    assert d["seed"] == 5 and d["events"] and d["metrics"]["length_exact"]
+    assert d["run_seed"] == 5 and d["seed"] != json.loads(wavs[1].with_suffix(".json").read_text())["seed"]
+    assert d["events"] and d["metrics"]["length_exact"]
+    # same run seed -> exactly the same run again
+    out2 = tmp_path / "out2"
+    args2 = [a if a != str(out) else str(out2) for a in args]
+    assert main(args2) == 0
+    assert file_sha1(out2 / wav.name) == file_sha1(wav)
     assert main(["render", str(js), "--out", str(tmp_path / "re.wav")]) == 0
     assert file_sha1(tmp_path / "re.wav") == file_sha1(wav)
 
@@ -272,3 +281,16 @@ def test_extend_tail_continues_and_decays():
     late = rms(y[:, n + int(0.29 * sr) : n + int(0.3 * sr)])
     assert 20 * np.log10(late / after) < -15  # keeps decaying (~-20 dB per 300 ms)
     assert np.array_equal(y, extend_tail(cut, sr, 300.0, 300.0, seed=1))  # deterministic
+
+
+def test_later_variations_pick_most_different_sample():
+    from loopforge.config import GenParams
+    from loopforge.generator.select import _pick_most_different
+
+    class FakeNN:
+        E = np.array([[0.0, 0], [0.1, 0], [5.0, 0], [0.2, 0], [4.8, 0]], np.float32)
+
+    rng = np.random.default_rng(0)
+    p = GenParams(diversity_top_frac=0.2)
+    # sample 0 was used before: the pick must be the candidate farthest from it (row 2)
+    assert {_pick_most_different([1, 2, 3, 4], [0], FakeNN(), rng, p) for _ in range(20)} == {2}

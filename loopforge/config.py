@@ -64,10 +64,11 @@ class GenParams:
     # "creative": mutated rhythm, palettes, flams, swing (M3 behaviour)
     mode: str = "simple"
     keep_flams: bool = True  # simple mode: keep the ref's flams/rolls (part of its rhythm)
-    simple_pool_max: int = 60  # simple mode: max same-type candidates per sound type
+    simple_pool_max: int = 150  # simple mode: max same-type candidates per sound type
     simple_per_file: int = 4  # ... and at most this many from one source file
+    diversity_top_frac: float = 0.2  # later variations pick randomly among the 20% most-different candidates
     simple_decay_range: tuple[float, float] = (0.6, 2.0)  # candidate decay / ref sound decay
-    simple_radius_scale: float = 2.0  # candidates within this x the spread of the ref's own hits
+    simple_radius_scale: float = 2.5  # candidates within this x the spread of the ref's own hits
     simple_radius_floor: float = 0.3  # minimum spread (embedding units) for very consistent ref sounds
     tail_extend: bool = True  # rebuild tails of ringing hits that were cut short in their source loop
 

@@ -82,7 +82,9 @@ def test_full_flow(server):
     assert st["job"]["state"] == "done", st["job"]["error"]
     rows = st["job"]["rows"]
     assert len(rows) == 2 and rows[0]["bars"] == 1 and rows[0]["peaks"]
-    assert st["settings"]["seed"] == 3 and rows[0]["seed"] == 3
+    assert st["settings"]["seed"] == 3
+    assert len({r["seed"] for r in rows}) == 2  # each variation has its own seed, derived from run seed 3
+    assert json.loads(open(rows[0]["json"]).read())["run_seed"] == 3
 
     # audio served, favourites toggle, outside paths refused
     code, wav = call(base, rows[0]["url"], raw=True)
@@ -103,7 +105,8 @@ def test_full_flow(server):
     code, r = call(base, "/api/generate", {"variations": 1, "seed_lock": False, "bars": 1})
     assert code == 200
     wait(base, lambda s: s["job"]["state"] in ("done", "error"))
-    assert call(base, "/api/state")[1]["job"]["rows"][0]["seed"] == r["seed"]
+    new_rows = call(base, "/api/state")[1]["job"]["rows"]
+    assert json.loads(open(new_rows[0]["json"]).read())["run_seed"] == r["seed"]
 
     # remove ref
     assert call(base, "/api/refs/remove", {"id": ref["id"]})[0] == 200

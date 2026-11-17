@@ -303,7 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--bars", type=int, default=2)
     g.add_argument("--variations", type=int, default=8)
     g.add_argument("--similarity", type=float, default=None, help=argparse.SUPPRESS)
-    g.add_argument("--seed", type=int, default=None, help="base seed (variation i uses seed+i); default: random")
+    g.add_argument("--seed", type=int, default=None, help="run seed (each variation gets its own random seed derived from it); default: random")
     g.add_argument("--swing", type=float, default=None, help=argparse.SUPPRESS)
     g.add_argument("--bpm", type=float, default=None, help="override tempo of refs/output")
     g.add_argument("--palette-size", type=int, default=None,

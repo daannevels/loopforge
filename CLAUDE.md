@@ -78,9 +78,16 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - **Simple-mode sound choice** (`select.same_type_candidates` + `choose_role_samples`): a library hit is
   "the same sound type" as ref role R when it is nearer to R's centroid than to any other ref role, within
   2× the spread (90th-pct radius) of the ref's own R hits, decays at 0.6–2× R's decay (a fast-dying "open
-  hat" sounds choppy), and needs ≤12 dB gain. Pool = closest 60, max 4 per source file (loops repeat the
-  same hit). Each variation picks `palette_size` (default 1) at random from the pool, preferring samples
-  AND files unused by earlier variations of the run (`RunMemory`), never sharing a sample between roles.
+  hat" sounds choppy), and needs ≤12 dB gain. Pool = closest 150 within 2.5× the ref spread, max 4 per
+  source file (loops repeat the same hit). Each variation picks `palette_size` (default 1) per sound type,
+  preferring samples AND files unused by earlier variations of the run (`RunMemory`), never sharing a
+  sample between roles. Variation 1 picks uniformly at random; later ones pick at random among the 20% of
+  candidates that are MOST different (max-min timbre distance) from what earlier variations used for that
+  sound type (`_pick_most_different`). 10% was tested: samples differ more but whole loops less.
+- **Seeds**: the run seed (random per run unless locked) derives one independent random seed per variation
+  (`rng(run_seed).choice(1e6, n, replace=False)`); recipes store both `seed` and `run_seed`. Adjacent seed
+  numbers were never "similar" for the RNG — the user's "too similar" was the narrow pool + pure random picks.
+  Measured over 3 runs: sample spread per sound type 1.40 → 1.73, loop-to-loop timbre distance 1.53 → 1.93.
   Palette > 1 mixes the extra samples in by weights .55/.3/.15/.1, repeats allowed.
   Measured on the user's refs/library (3 seeds × 8): 32–33 distinct samples per run, none reused,
   22 of 24 usable files; level dip between 16ths 15.0–15.6 dB median / 21.8–23.5 dB p90 (refs 16.4 / 27.7).
