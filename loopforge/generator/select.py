@@ -127,3 +127,38 @@ def assign_slices(
         used[f] = used.get(f, 0) + 1
         prev = row
     return out
+
+
+def choose_role_samples(
+    profile: RefProfile,
+    events: list[PatternEvent],
+    table: SliceTable,
+    nn: NearestNeighbors,
+    similarity: float,
+    rng: np.random.Generator,
+    p: GenParams,
+    exclude: np.ndarray,
+    avoid: set[int] | None = None,
+) -> dict[int, int]:
+    """Simple mode: ONE library slice per sound type. Closest matches are likeliest; slices already
+    used by earlier variations of the same run are avoided while alternatives remain."""
+    avoid = avoid or set()
+    k = candidate_k(similarity, p)
+    tau = 0.15 + 0.6 * (1 - similarity)
+    used_roles = sorted({e.role for e in events})
+    chosen: dict[int, int] = {}
+    for r in used_roles:
+        role = profile.roles[r]
+        idx, dist = nn.query_diverse(role.centroid, 3 * k + 8, table.file_idx, max_per_group=p.candidates_per_file,
+                                     exclude=exclude, min_separation=0.05, embedded=True)
+        if len(idx) == 0:
+            raise RuntimeError(f"no library candidates for role {role.name}")
+        adj = dist + fit_penalty(table, idx, role, p)
+        order = np.argsort(adj, kind="stable")[:k]
+        pool = [int(idx[i]) for i in order]
+        pd = np.array([adj[i] for i in order])
+        fresh = [i for i, row in enumerate(pool) if row not in avoid and row not in chosen.values()]
+        cand = fresh or list(range(len(pool)))
+        w = np.exp(-(pd[cand] - pd[cand].min()) / tau)
+        chosen[r] = pool[cand[int(rng.choice(len(cand), p=w / w.sum()))]]
+    return chosen

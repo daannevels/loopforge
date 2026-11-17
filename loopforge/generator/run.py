@@ -5,10 +5,10 @@ from __future__ import annotations
 import numpy as np
 
 from loopforge.config import ANALYZER_VERSION, GenParams
-from loopforge.generator.pattern import generate_pattern
+from loopforge.generator.pattern import generate_pattern, generate_simple_pattern
 from loopforge.generator.profile import RefProfile
 from loopforge.generator.recipe import Recipe, RecipeEvent, SliceLoader, finalize, mix_events
-from loopforge.generator.select import assign_slices, build_palettes
+from loopforge.generator.select import assign_slices, build_palettes, choose_role_samples
 from loopforge.library.index import SliceTable
 from loopforge.library.search import NearestNeighbors
 from loopforge.models import FEATURE_INDEX
@@ -39,7 +39,10 @@ def generate_one(
     loader: SliceLoader,
     refs_info: list[dict] | None = None,
     version: str = "",
+    avoid_rows: set[int] | None = None,
 ) -> tuple[Recipe, np.ndarray]:
+    """One loop. `avoid_rows` (simple mode): library rows used by earlier variations; this
+    variation's rows are added to it."""
     rng = np.random.default_rng(seed)
     bpm = float(p.bpm or profile.bpm)
     sr = profile.sr
@@ -47,12 +50,22 @@ def generate_one(
     step_samples = 60.0 / bpm / 4 * sr
     beat_samples = 4 * step_samples
 
-    pattern, template = generate_pattern(profile, p.similarity, rng, p)
-    palettes = build_palettes(profile, pattern, table, nn, p.similarity, rng, p, exclude)
-    rows = assign_slices(pattern, palettes, table, rng, p)
+    simple = p.mode == "simple"
+    if simple:
+        pattern, template = generate_simple_pattern(profile, rng)
+        choice = choose_role_samples(profile, pattern, table, nn, p.similarity, rng, p, exclude, avoid_rows)
+        rows = [choice[e.role] for e in pattern]
+        swing = 0.0
+    else:
+        pattern, template = generate_pattern(profile, p.similarity, rng, p)
+        palettes = build_palettes(profile, pattern, table, nn, p.similarity, rng, p, exclude)
+        rows = assign_slices(pattern, palettes, table, rng, p)
+        swing = p.swing
+    if avoid_rows is not None:
+        avoid_rows.update(rows)
 
     positions = [
-        int(round((e.step + (p.swing if e.step % 2 else 0.0) + e.sub_offset) * step_samples)) % N for e in pattern
+        int(round((e.step + (swing if e.step % 2 else 0.0) + e.sub_offset) * step_samples)) % N for e in pattern
     ]
     order = np.argsort(positions, kind="stable")
     overlap = int(round(p.overlap_ms * sr / 1000))
@@ -65,8 +78,18 @@ def generate_one(
         role = profile.roles[e.role]
         src_sr = table.sr(row)
         src_len = int(np.ceil((table.end[row] - table.start[row]) * sr / src_sr))
-        length = max(gap + overlap, ring) if role.long else gap + overlap
-        length = int(min(length, src_len))
+        want = max(gap + overlap, ring) if role.long else gap + overlap
+        tail_ms, tail_decay = 0.0, 0.0
+        decay = float(table.features[row, FI["decay_ms"]])
+        if p.tail_extend and src_len < want:
+            # The slice was cut (by the next hit in its source loop) before it could fill its slot here:
+            # let it ring on naturally, to about -40 dB (2x its -20 dB decay time), at most `want`.
+            natural = int(min(want, src_len + 2.0 * decay * sr / 1000))
+            if natural > src_len:
+                tail_ms = round((natural - src_len) * 1000.0 / sr, 3)
+                tail_decay = round(decay, 3)
+                src_len = natural
+        length = int(min(want, src_len))
         peak = float(table.features[row, FI["peak_db"]])
         gain = float(np.clip(e.vel_db - peak, -p.gain_clamp_db, p.gain_clamp_db))
         f = table.files[int(table.file_idx[row])]
@@ -76,10 +99,11 @@ def generate_one(
             src_start=int(table.start[row]), src_end=int(table.end[row]), slice_index=int(table.slice_idx[row]),
             gain_db=round(gain, 3), fade_in_ms=p.fade_in_ms, fade_out_ms=p.fade_out_ms,
             target_db=round(e.vel_db, 2), slice_peak_db=round(peak, 2),
+            tail_ms=tail_ms, tail_decay_ms=tail_decay, tail_seed=int(seed * 1000 + j),
         ))
 
     recipe = Recipe(
-        seed=seed, bpm=bpm, bars=p.bars, sr=sr, n_samples=N, swing=p.swing, similarity=p.similarity,
+        seed=seed, bpm=bpm, bars=p.bars, sr=sr, n_samples=N, swing=swing, similarity=p.similarity, mode=p.mode,
         params=p.to_dict(), refs=refs_info or [], library_root=str(table.root), template=template,
         roles=[r.to_dict() for r in profile.roles], pattern=[e.to_dict() for e in pattern], events=events,
         limiter_ceiling_db=p.limiter_ceiling_db, limiter_knee=p.limiter_knee,

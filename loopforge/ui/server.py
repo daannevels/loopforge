@@ -31,6 +31,7 @@ from loopforge.service import GenRequest, RefLoop, load_ref, run_generation, tem
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 300 * 1024 * 1024
 MAX_REFS = 3
+SETTING_KEYS = ("similarity", "bars", "variations", "seed", "swing", "palette_size", "bpm", "mode")
 
 
 def default_workspace() -> Path:
@@ -56,7 +57,7 @@ class App:
         self.refs: dict[str, RefLoop] = {}
         self.ref_order: list[str] = []
         self.settings: dict = {"similarity": 0.7, "bars": 2, "variations": 8, "seed": 42, "swing": 0.0,
-                               "palette_size": 3, "bpm": None, "library": None}
+                               "palette_size": 3, "bpm": None, "library": None, "mode": "simple"}
         self.index = {"state": "none", "done": 0, "total": 0, "current": "", "stats": None, "error": None}
         self.job = {"state": "idle", "log": [], "rows": [], "run": None, "error": None, "total": 0, "started": None}
         self._stop = False
@@ -198,7 +199,7 @@ class App:
                 raise ValueError("choose your library folder first")
             if self.index["state"] == "indexing":
                 raise ValueError("wait for library indexing to finish")
-            for k in ("similarity", "bars", "variations", "seed", "swing", "palette_size", "bpm"):
+            for k in SETTING_KEYS:
                 if k in opts:
                     self.settings[k] = opts[k]
             s = self.settings
@@ -206,14 +207,15 @@ class App:
             err = tempo_conflict(refs, s.get("bpm"))
             if err:
                 raise ValueError(err)
-            gp = replace(GenParams(), bars=int(s["bars"]), similarity=float(s["similarity"]),
+            mode = "creative" if s.get("mode") == "creative" else "simple"
+            gp = replace(GenParams(), mode=mode, bars=int(s["bars"]), similarity=float(s["similarity"]),
                          swing=float(s["swing"]), palette_size=int(s["palette_size"]),
                          bpm=float(s["bpm"]) if s.get("bpm") else None)
             run = time.strftime("%Y-%m-%d_%H%M%S")
             req = GenRequest(refs=refs, library=s["library"], out_dir=self.ws / "runs" / run, gp=gp,
                              aparams=self.aparams, variations=int(s["variations"]), seed=int(s["seed"]),
                              jobs=self.jobs, png=False, update_index=True,
-                             command=f"ui: sim={gp.similarity} bars={gp.bars} seed={s['seed']}")
+                             command=f"ui: mode={mode} sim={gp.similarity} bars={gp.bars} seed={s['seed']}")
             self._save_settings()
             self._stop = False
             self.job = {"state": "running", "log": [], "rows": [], "run": run, "error": None,
@@ -482,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if u.path == "/api/settings":
                 with app.lock:
-                    for k in ("similarity", "bars", "variations", "seed", "swing", "palette_size", "bpm"):
+                    for k in SETTING_KEYS:
                         if k in body:
                             app.settings[k] = body[k]
                     app._save_settings()

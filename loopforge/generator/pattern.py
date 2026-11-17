@@ -101,3 +101,20 @@ def generate_pattern(
             events.append(PatternEvent(e.step, e.role, e.vel_db, e.sub_offset, "flam"))
     events.sort(key=lambda e: (e.step, e.sub_offset))
     return events, profile.template_names[ti]
+
+
+def generate_simple_pattern(profile: RefProfile, rng: np.random.Generator) -> tuple[list[PatternEvent], str]:
+    """Straight 16ths on every step. Sound type and level per step come from one ref section;
+    steps the section leaves empty get the refs' most common sound type for that step."""
+    ti = int(rng.integers(len(profile.templates)))
+    prim = {e.step: e for e in profile.templates[ti] if e.sub_offset == 0}
+    events: list[PatternEvent] = []
+    for o in range(profile.n_steps):
+        if o in prim:
+            e = prim[o]
+            events.append(PatternEvent(o, e.role, float(min(e.vel_db, 0.0)), 0.0, "template"))
+        else:
+            r = int(np.argmax(profile.step_role_prob[o]))
+            vel = profile.roles[r].level_db + profile.accent_db[o]
+            events.append(PatternEvent(o, r, float(min(vel, 0.0)), 0.0, "filled"))
+    return events, profile.template_names[ti]

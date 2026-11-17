@@ -13,6 +13,8 @@ from typing import Callable
 
 import numpy as np
 
+from loopforge.generator.tail import extend_tail
+
 RECIPE_VERSION = 1
 
 
@@ -35,6 +37,9 @@ class RecipeEvent:
     fade_out_ms: float
     target_db: float  # target peak level from the pattern
     slice_peak_db: float
+    tail_ms: float = 0.0  # synthesized tail added after the slice (see generator/tail.py)
+    tail_decay_ms: float = 0.0
+    tail_seed: int = 0
 
 
 @dataclass
@@ -58,6 +63,7 @@ class Recipe:
     limiter_knee: float = 0.7
     analyzer_version: int = 0
     loopforge_version: str = ""
+    mode: str = "creative"
     recipe_version: int = RECIPE_VERSION
     metrics: dict = field(default_factory=dict)
 
@@ -98,7 +104,10 @@ def mix_events(recipe: Recipe, loader: SliceLoader) -> np.ndarray:
     clips = []
     longest = 0
     for e in recipe.events:
-        x = np.array(loader(e, sr)[:, : e.length], dtype=np.float32, copy=True)
+        x = loader(e, sr)
+        if e.tail_ms > 0:
+            x = extend_tail(x, sr, e.tail_ms, e.tail_decay_ms, e.tail_seed)
+        x = np.array(x[:, : e.length], dtype=np.float32, copy=True)
         x = _fade(x, int(round(e.fade_in_ms * sr / 1000)), int(round(e.fade_out_ms * sr / 1000)))
         x *= np.float32(10 ** (e.gain_db / 20))
         clips.append((e.position, x))

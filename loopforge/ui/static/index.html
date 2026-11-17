@@ -65,6 +65,13 @@
         </div>
         <div class="engine-side">
           <div class="field">
+            <label>Mode</label>
+            <div class="seg" id="seg-mode" role="radiogroup" aria-label="Generation mode">
+              <button data-v="simple" role="radio" title="Straight 16ths, your reference's rhythm; each sound type swapped for one library sample">Simple</button><button data-v="creative" role="radio" title="Rhythm is varied too (less similarity = more changes), several samples per sound type, swing">Creative</button>
+            </div>
+            <div class="mode-help" id="mode-help"></div>
+          </div>
+          <div class="field">
             <label>Length</label>
             <div class="seg" id="seg-bars" role="radiogroup" aria-label="Loop length in bars">
               <button data-v="1" role="radio">1 bar</button><button data-v="2" role="radio">2 bars</button><button data-v="4" role="radio">4 bars</button>

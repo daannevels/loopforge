@@ -60,6 +60,10 @@ class GenParams:
     similarity: float = 0.7  # 1 = stay close to the refs, 0 = loose
     swing: float = 0.0  # output swing (delay of odd 16ths, in steps); straight by default
     bpm: float | None = None  # override output tempo (default: refs' tempo)
+    # "simple": straight 16ths, ref rhythm + sound type per step kept, one sample per sound type
+    # "creative": mutated rhythm, palettes, flams, swing (M3 behaviour)
+    mode: str = "simple"
+    tail_extend: bool = True  # rebuild tails of ringing hits that were cut short in their source loop
 
     # Roles (clusters of reference hits)
     max_roles: int = 6
@@ -87,8 +91,8 @@ class GenParams:
     # Assembly
     gain_clamp_db: float = 12.0
     fade_in_ms: float = 1.0
-    fade_out_ms: float = 4.0
-    overlap_ms: float = 3.0  # short hits ring this far into the next hit (fade-out underneath it)
+    fade_out_ms: float = 10.0
+    overlap_ms: float = 10.0  # hits ring this far into the next hit (fade-out underneath it)
     long_role_decay_ms: float = 120.0  # roles with longer decay may ring past the next hit
     max_ring_beats: float = 1.0
     limiter_ceiling_db: float = -1.0

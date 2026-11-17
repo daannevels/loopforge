@@ -143,8 +143,24 @@ function saveSettings() {
 function currentSettings() {
   return {
     similarity: knobs.similarity.get(), swing: knobs.swing.get(), variations: knobs.variations.get(),
-    palette_size: knobs.palette.get(), bars: barsValue, seed: parseInt($("#seed").value || "0", 10),
+    palette_size: knobs.palette.get(), bars: barsValue, seed: parseInt($("#seed").value || "0", 10), mode: modeValue,
   };
+}
+
+let modeValue = "simple";
+const MODE_HELP = {
+  simple: "Keeps your reference's 16th rhythm and swaps each sound type (open hat, closed hat, …) for one library sample. Similarity = how close those sounds are.",
+  creative: "Also varies the rhythm (lower similarity = more changes), mixes several samples per sound type and allows swing.",
+};
+function setMode(v) {
+  modeValue = v === "creative" ? "creative" : "simple";
+  document.querySelectorAll("#seg-mode button").forEach(b => b.setAttribute("aria-checked", String(b.dataset.v === modeValue)));
+  $("#mode-help").textContent = MODE_HELP[modeValue];
+  const simple = modeValue === "simple";
+  $("#k-swing").classList.toggle("off", simple);
+  $("#k-palette").classList.toggle("off", simple);
+  $("#k-swing").title = simple ? "Simple mode is always straight" : "";
+  $("#k-palette").title = simple ? "Simple mode uses one sample per sound type" : "";
 }
 
 let barsValue = 2;
@@ -419,7 +435,7 @@ function renderStatus() {
 
 function applySettings(s) {
   knobs.similarity.set(s.similarity); knobs.swing.set(s.swing || 0); knobs.variations.set(s.variations);
-  knobs.palette.set(s.palette_size); setBars(+s.bars || 2); $("#seed").value = s.seed;
+  knobs.palette.set(s.palette_size); setBars(+s.bars || 2); $("#seed").value = s.seed; setMode(s.mode || "simple");
 }
 
 async function refresh() {
@@ -497,6 +513,8 @@ function init() {
     help: () => "per instrument role", onChange: saveSettings,
   });
   document.querySelectorAll("#seg-bars button").forEach(b => (b.onclick = () => { setBars(+b.dataset.v); saveSettings(); }));
+  document.querySelectorAll("#seg-mode button").forEach(b => (b.onclick = () => { setMode(b.dataset.v); saveSettings(); }));
+  setMode("simple");
   $("#seed").addEventListener("change", saveSettings);
   $("#btn-dice").onclick = () => { $("#seed").value = Math.floor(Math.random() * 100000); saveSettings(); };
 

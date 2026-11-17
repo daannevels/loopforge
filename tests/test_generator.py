@@ -65,7 +65,7 @@ def world(tmp_path_factory):
 
 
 def gen(world, seed=1, **kw):
-    gp = GenParams(**{**world["gp"].to_dict(), **kw})
+    gp = GenParams(**{**world["gp"].to_dict(), "mode": "creative", **kw})
     return generate_one(world["profile"], world["table"], world["nn"], gp, seed, world["exclude"], recipe_loader())
 
 
@@ -203,3 +203,47 @@ def test_cli_generate_and_render(world, tmp_path, capsys):
     assert d["seed"] == 5 and d["events"] and d["metrics"]["length_exact"]
     assert main(["render", str(js), "--out", str(tmp_path / "re.wav")]) == 0
     assert file_sha1(tmp_path / "re.wav") == file_sha1(wav)
+
+
+def test_simple_mode_keeps_ref_rhythm_and_one_sample_per_role(world):
+    avoid: set[int] = set()
+    seen = []
+    for seed in range(3):
+        recipe, audio = generate_one(world["profile"], world["table"], world["nn"], GenParams(bars=2, mode="simple"),
+                                     seed, world["exclude"], recipe_loader(), avoid_rows=avoid)
+        assert recipe.mode == "simple" and recipe.swing == 0.0
+        steps = [p["step"] for p in recipe.pattern]
+        assert steps == list(range(32))  # every 16th, exactly once, no flams
+        by_role: dict[str, set] = {}
+        for e in recipe.events:
+            by_role.setdefault(e.role, set()).add((e.source_rel, e.slice_index))
+        assert all(len(v) == 1 for v in by_role.values())  # one sample per sound type
+        tmpl = world["profile"].templates[world["profile"].template_names.index(recipe.template)]
+        ref_roles = {e.step: world["profile"].roles[e.role].name for e in tmpl if e.sub_offset == 0}
+        assert all(p_role == ref_roles[s] for s, p_role in ((e.step, e.role) for e in recipe.events) if s in ref_roles)
+        assert seam_ratio(audio) < 1.0
+        seen.append(frozenset().union(*by_role.values()))
+    assert seen[0] != seen[1]  # later variations prefer different samples
+
+
+def test_extend_tail_continues_and_decays():
+    from loopforge.generator.tail import extend_tail
+    from tests.synth import open_hat
+
+    sr = SR
+    full = open_hat(sr=sr, decay_ms=300.0)
+    cut = np.stack([full[: int(0.1 * sr)]] * 2)  # truncated after 100 ms, like a dense source loop
+    y = extend_tail(cut, sr, extra_ms=300.0, decay_ms=300.0, seed=1)
+    assert y.shape == (2, cut.shape[1] + int(round(0.3 * sr)))
+    assert np.array_equal(y[:, : cut.shape[1] - int(0.006 * sr)], cut[:, : cut.shape[1] - int(0.006 * sr)])
+
+    def rms(a):
+        return float(np.sqrt(np.mean(a.astype(np.float64) ** 2)))
+
+    n = cut.shape[1]
+    w = int(0.01 * sr)
+    before, after = rms(cut[:, n - 2 * w : n]), rms(y[:, n : n + w])
+    assert 0.5 < after / before < 1.6  # no jump or hole at the join
+    late = rms(y[:, n + int(0.29 * sr) : n + int(0.3 * sr)])
+    assert 20 * np.log10(late / after) < -15  # keeps decaying (~-20 dB per 300 ms)
+    assert np.array_equal(y, extend_tail(cut, sr, 300.0, 300.0, seed=1))  # deterministic

@@ -148,12 +148,14 @@ def run_generation(
     loader = recipe_loader()
     ref_t = timbre_stats(analyses)
     rows: list[dict] = []
+    avoid: set[int] = set()  # simple mode: give each variation different samples
     for v in range(req.variations):
         if should_stop and should_stop():
             log("stopped")
             break
         seed = req.seed + v
-        recipe, audio = generate_one(profile, table, nn, gp, seed, exclude, loader, refs_info, __version__)
+        recipe, audio = generate_one(profile, table, nn, gp, seed, exclude, loader, refs_info, __version__,
+                                     avoid_rows=avoid)
         stem = f"var_{v + 1:02d}_seed{seed}"
         wav = write_wav(out / f"{stem}.wav", audio, recipe.sr)
         oa = analyze_loop(audio, recipe.sr, name=wav.name, params=req.aparams)

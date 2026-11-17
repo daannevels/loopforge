@@ -186,7 +186,7 @@ def cmd_neighbors(args: argparse.Namespace) -> int:
 def _gen_params(args: argparse.Namespace):
     from loopforge.config import GenParams
 
-    kw = {k: getattr(args, k) for k in ("bars", "similarity", "swing", "bpm", "palette_size", "max_file_share")
+    kw = {k: getattr(args, k) for k in ("bars", "similarity", "swing", "bpm", "palette_size", "max_file_share", "mode")
           if getattr(args, k, None) is not None}
     return GenParams(**kw)
 
@@ -291,6 +291,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--refs", nargs="+", required=True, help="1-3 reference loops")
     g.add_argument("--library", required=True)
     g.add_argument("--cache", default=None)
+    g.add_argument("--mode", choices=["simple", "creative"], default=None,
+                   help="simple (default): straight 16ths, ref rhythm, one sample per sound type; "
+                        "creative: mutated rhythm, sample palettes, flams, swing")
     g.add_argument("--bars", type=int, default=2)
     g.add_argument("--variations", type=int, default=8)
     g.add_argument("--similarity", type=float, default=0.7, help="0 = loose, 1 = close to the refs (default 0.7)")
