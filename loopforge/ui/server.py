@@ -135,9 +135,9 @@ class App:
         r = self.refs[rid]
         a = r.analysis
         n = max(1, a.n_samples)
-        roles: dict[str, int] = {}
-        for s in a.slices:
-            roles[s.role] = roles.get(s.role, 0) + 1
+        from loopforge.analysis.instruments import summarize
+
+        roles = summarize(s.role for s in a.slices)
         return {
             "id": rid, "name": r.name, "path": str(r.path), "url": file_url(r.path),
             "bpm": round(a.tempo.bpm, 2), "bars": a.tempo.bars, "beats": a.tempo.beats, "method": a.tempo.method,

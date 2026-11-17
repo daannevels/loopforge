@@ -256,13 +256,20 @@ class SliceTable:
         bad = np.array([f["sha1"] in sha1s for f in self.files], dtype=bool)
         return bad[self.file_idx] if len(self.file_idx) else np.zeros(0, bool)
 
-    def clap_masks(self) -> tuple[np.ndarray, np.ndarray]:
-        """(is_clap, tainted) per slice, see analysis/claps.py. Computed once and cached."""
-        if getattr(self, "_claps", None) is None:
-            from loopforge.analysis.claps import clap_flags
+    def tainted_mask(self) -> np.ndarray:
+        """Slices ringing under a clap/snare tail of their source loop (see analysis/instruments.py).
+        Computed once and cached."""
+        if getattr(self, "_tainted", None) is None:
+            from loopforge.analysis.instruments import tainted_mask
 
-            self._claps = clap_flags(self.features, self.step, self.file_idx)
-        return self._claps
+            self._tainted = tainted_mask(np.asarray(self.role, dtype=object), self.features, self.step,
+                                         self.file_idx)
+        return self._tainted
+
+    def instrument_counts(self) -> dict[str, int]:
+        from loopforge.analysis.instruments import summarize
+
+        return summarize(self.role)
 
     def mask_quiet(self, min_rms_db: float) -> np.ndarray:
         """Boolean mask of slices quieter than `min_rms_db` (near-silent / ghost slices)."""
@@ -277,6 +284,9 @@ class SliceTable:
             "files": len(self.files),
             "slices": len(self),
             "roles": dict(Counter(self.role)),
+            "instruments": self.instrument_counts(),
+            "instrument_loops": {c: len({int(self.file_idx[i]) for i, r in enumerate(self.role) if r == c})
+                                 for c in self.instrument_counts()},
             "bpm": dict(Counter(round(f["bpm"], 2) for f in self.files)),
             "sample_rates": dict(Counter(f["sr"] for f in self.files)),
         }

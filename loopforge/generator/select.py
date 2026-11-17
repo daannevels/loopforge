@@ -144,41 +144,35 @@ class RunMemory:
 
 def same_type_candidates(profile: RefProfile, role_id: int, table: SliceTable, nn: NearestNeighbors,
                          exclude: np.ndarray, p: GenParams) -> np.ndarray:
-    """Library rows that are clearly the same sound type as reference role `role_id`: closer to this
-    role's centroid than to any other role of the refs, and usable at the ref's level (gain within
-    the clamp). Sorted by closeness. Falls back to the few nearest rows if nothing qualifies."""
+    """Library rows of the SAME instrument as reference role `role_id` (instrument scan labels: a snare is
+    only replaced by a snare, an open hat by an open hat, ...), usable at the ref's level (gain within the
+    clamp) and, for hats/shakers/percs, ringing about as long as the ref's sound (a fast-dying "open hat"
+    sounds choppy). Never a slice that carries a clap/snare tail from its source loop. Closest first."""
     from loopforge.models import FEATURE_INDEX as FI
 
-    C = np.stack([r.centroid for r in profile.roles])
-    D = nn.distances(C, embedded=True)  # (roles, n)
-    D[:, exclude] = np.inf
-    own = D[role_id]
-    nearest_role = np.argmin(D, axis=0)
     role = profile.roles[role_id]
-    is_clap, tainted = table.clap_masks()
+    own = nn.distances(role.centroid, embedded=True)[0]
+    own[exclude] = np.inf
+    labels = np.asarray(table.role, dtype=object)
+    tainted = table.tainted_mask()
+    same = labels == role.instrument
     gain_ok = np.abs(role.level_db - table.features[:, FI["peak_db"]]) <= p.gain_clamp_db
-    if role.is_clap:
-        # a clap is replaced by a clap: any detected library clap (the run excludes near-copies of the
-        # refs' own claps), closest first; no radius limit - a *different* clap is the point
-        ok = np.isfinite(own) & is_clap & gain_ok
-        rows = np.nonzero(ok)[0]
-        if len(rows):
-            rows = rows[np.argsort(own[rows], kind="stable")]
-            return _cap_per_file(rows, table, p)
-        # no usable claps in the library: fall back to the closest clap-like (mid-heavy) sounds below
-    # must ring like the ref's sound: a quickly-dying "open hat" leaves holes (sounds choppy)
     ref_decay = float(role.mean_features[FI["decay_ms"]])
     ratio = table.features[:, FI["decay_ms"]] / max(ref_decay, 1.0)
     decay_ok = (ratio >= p.simple_decay_range[0]) & (ratio <= p.simple_decay_range[1])
-    # close enough in absolute terms: a sound type the refs don't have (e.g. a rim shot) must not be
-    # filed under the nearest ref sound just because it is "least far"
-    near = own <= max(role.radius, p.simple_radius_floor) * p.simple_radius_scale
-    # hats & co never come from a clap or from a slice carrying a clap's tail (that brings the clap along)
-    ok = np.isfinite(own) & (nearest_role == role_id) & gain_ok & decay_ok & near & ~is_clap & ~tainted
-    rows = np.nonzero(ok)[0]
-    if len(rows) < p.palette_size:
-        finite = np.nonzero(np.isfinite(own) & ~is_clap & ~tainted)[0]
-        rows = finite[np.argsort(own[finite], kind="stable")[: max(p.palette_size, 4)]]
+    if role.is_clap:  # clap/snare: a *different* one is the point, its tail is synthesized anyway
+        decay_ok = np.ones_like(decay_ok)
+    base = np.isfinite(own) & ~tainted
+    rows = np.array([], dtype=np.int64)
+    for ok in (base & same & gain_ok & decay_ok, base & same & gain_ok, base & same):  # relax step by step
+        rows = np.nonzero(ok)[0]
+        if len(rows) >= p.palette_size:
+            break
+    if len(rows) == 0:
+        # the library has no such instrument at all: closest sounds that are not another drum type
+        not_drum = ~np.isin(labels, ("clap", "snare", "tail")) if not role.is_clap else ~np.isin(labels, ("tail",))
+        rows = np.nonzero(base & not_drum)[0]
+        rows = rows[np.argsort(own[rows], kind="stable")[: max(p.palette_size, 4)]]
     rows = rows[np.argsort(own[rows], kind="stable")]
     return _cap_per_file(rows, table, p)
 

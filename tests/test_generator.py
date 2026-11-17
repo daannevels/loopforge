@@ -240,15 +240,13 @@ def test_simple_mode_copies_ref_rhythm_exactly(world):
     assert len(set().union(*files_per_var)) >= 5
 
 
-def test_simple_mode_picks_same_sound_type(world):
+def test_simple_mode_picks_same_instrument(world):
     from loopforge.generator.select import same_type_candidates
 
     pr, t = world["profile"], world["table"]
-    voice = np.array([t.files[i]["rel"].split("_")[0] for i in t.file_idx])
     for role in pr.roles:
         rows = same_type_candidates(pr, role.id, t, world["nn"], world["exclude"], GenParams())
-        kinds, counts = np.unique(voice[rows], return_counts=True)
-        assert counts.max() / counts.sum() >= 0.8, (role.name, dict(zip(kinds, counts)))
+        assert len(rows) and all(t.role[i] == role.instrument for i in rows), role.name
 
 
 def test_simple_mode_palette(world):

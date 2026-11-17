@@ -2,7 +2,13 @@
 /* Loopforge UI — vanilla JS, talks to the local Python server (/api/*). */
 
 const $ = (s, el = document) => el.querySelector(s);
-const ROLE_COLORS = { clap: "#ff5d5d", closed: "#4cc9f0", open: "#f5a524", shaker: "#8be36b", perc: "#ff6ad5" };
+const ROLE_COLORS = {
+  clap: "#ff5d5d", snare: "#b388ff", closed: "#4cc9f0", open: "#f5a524", shaker: "#8be36b", perc: "#ff6ad5",
+  other: "#8a919c", tail: "#4a4f59",
+};
+const INST_NAMES = { closed_hat: "closed hat", open_hat: "open hat", shaker: "shaker", clap: "clap", snare: "snare", perc: "perc", other: "other" };
+const instList = roles => Object.entries(roles || {}).map(([k, n]) =>
+  `<span class="inst"><i style="background:${roleColor(k)}"></i>${INST_NAMES[k] || k} ${n}</span>`).join("");
 const roleColor = (name = "") => {
   for (const k in ROLE_COLORS) if (name.startsWith(k)) return ROLE_COLORS[k];
   return "#b9bec8";
@@ -218,6 +224,7 @@ function renderRefs() {
       <div style="min-width:0">
         <div class="name" title="${esc(r.path)}">${esc(r.name)}</div>
         <div class="meta">${r.bpm} BPM · ${r.beats % 4 ? r.beats + " beats" : r.bars + " bars"} · ${r.hits} hits${r.swing > 0.08 ? " · swing " + Math.round(r.swing * 100) + "%" : ""}</div>
+        <div class="insts" title="Instruments found by the scan - only these get replaced, each by the same instrument from your library">${instList(r.roles)}</div>
         <canvas></canvas>
       </div>
       <button class="remove" title="Remove reference" aria-label="Remove ${esc(r.name)}">✕</button>`;
@@ -254,7 +261,10 @@ function renderLibrary() {
       `<b>${st.files}</b> loops`, `<b>${st.slices}</b> hits`,
       ...Object.keys(st.bpm).slice(0, 4).map(b => `<b>${b}</b> BPM ×${st.bpm[b]}`),
     ];
-    stats.innerHTML = chips.map(c => `<span class="chip">${c}</span>`).join("");
+    const inst = st.instrument_loops || {};
+    stats.innerHTML = chips.map(c => `<span class="chip">${c}</span>`).join("") +
+      (Object.keys(inst).length ? `<div class="insts lib" title="How many of your loops contain each instrument">${
+        Object.entries(inst).map(([k, n]) => `<span class="inst"><i style="background:${roleColor(k)}"></i>${INST_NAMES[k] || k} in ${n} loops</span>`).join("")}</div>` : "");
   }
   if (ix.state === "error") stats.innerHTML += `<span class="chip err">${esc(ix.error || "indexing failed")}</span>`;
   if (ix.report && ix.report.failed && Object.keys(ix.report.failed).length)

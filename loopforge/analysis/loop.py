@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from loopforge.analysis.features import describe_role, slice_features
+from loopforge.analysis.features import slice_features
+from loopforge.analysis.instruments import classify_hits
 from loopforge.analysis.onsets import detect_onsets
 from loopforge.analysis.slicing import make_slices
 from loopforge.analysis.tempo import estimate_tempo
@@ -44,7 +45,9 @@ def analyze_loop(
     feats = np.zeros((len(slices), N_FEATURES), dtype=np.float32)
     for i, s in enumerate(slices):
         feats[i] = slice_features(mono[s.start : s.end], sr, p)
-        s.role = describe_role(feats[i])
+    labels = classify_hits(feats, np.array([s.step for s in slices], dtype=np.int64))
+    for s, lab in zip(slices, labels):
+        s.role = str(lab)  # instrument scan: closed_hat / open_hat / shaker / clap / snare / perc / other / tail
 
     return LoopAnalysis(
         name=name, sr=sr, n_samples=n, channels=channels, tempo=tempo, swing=swing,

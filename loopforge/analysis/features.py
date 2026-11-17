@@ -46,6 +46,28 @@ def attack_decay_ms(x: np.ndarray, sr: int) -> tuple[float, float]:
     return attack, float(np.clip(-20.0 / slope, 0.5, 2000.0))
 
 
+def tonal_db(x: np.ndarray, sr: int, ms: float = 80.0) -> float:
+    """How strongly one pitch stands out between 100 Hz and 3 kHz: the largest spectral peak relative to
+    the local spectrum around it (moving median over +-~150 Hz, so filter slopes don't count), in dB, in
+    the first `ms`. Tonal percussion (conga, bongo, rim, wood) scores well above noise (hats, claps, snares)."""
+    from scipy.ndimage import median_filter
+
+    n = max(64, int(ms * sr / 1000))
+    y = np.asarray(x[:n], dtype=np.float64)
+    y = np.pad(y, (0, n - len(y)))
+    X = np.abs(np.fft.rfft(y * np.hanning(n))) ** 2
+    f = np.fft.rfftfreq(n, 1.0 / sr)
+    sel = (f >= 100.0) & (f < 3000.0)
+    if sel.sum() < 8 or X[sel].sum() <= 0:
+        return 0.0
+    w = max(5, int(round(300.0 / (f[1] - f[0]))) | 1)  # ~300 Hz window
+    local = median_filter(X, size=w, mode="nearest")
+    ratio = X[sel] / (local[sel] + 1e-20)
+    # weight by how much energy the band carries: a pitch peak in an empty band means nothing
+    share = X[sel].sum() / (X.sum() + 1e-20)
+    return float(10.0 * np.log10(ratio.max() + 1e-12) * min(1.0, share / 0.2))
+
+
 def slice_features(x: np.ndarray, sr: int, p: AnalysisParams) -> np.ndarray:
     """Feature vector for one mono slice."""
     x = np.asarray(x, dtype=np.float32)
@@ -83,6 +105,8 @@ def slice_features(x: np.ndarray, sr: int, p: AnalysisParams) -> np.ndarray:
     v[fi["band_low"]] = total[freqs < lo].sum() / tot
     v[fi["band_mid"]] = total[(freqs >= lo) & (freqs < hi)].sum() / tot
     v[fi["band_high"]] = total[freqs >= hi].sum() / tot
+
+    v[fi["tonal_db"]] = tonal_db(x, sr)
 
     mf = dsp.mfcc_from_power(S_full, sr, n_fft, p.n_mfcc, p.mfcc_fmax)
     v[fi["mfcc_0"] : fi["mfcc_0"] + p.n_mfcc] = mf @ w
