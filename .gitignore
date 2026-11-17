@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+# generated outputs / local audio (never commit samples)
+out/
+*.wav
+*.aif
+*.aiff
+*.flac
+.loopforge/
