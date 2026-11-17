@@ -91,6 +91,15 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   Palette > 1 mixes the extra samples in by weights .55/.3/.15/.1, repeats allowed.
   Measured on the user's refs/library (3 seeds × 8): 32–33 distinct samples per run, none reused,
   22 of 24 usable files; level dip between 16ths 15.0–15.6 dB median / 21.8–23.5 dB p90 (refs 16.4 / 27.7).
+- **Claps** (`analysis/claps.py`, user feedback "the original clap is still there"): a clap = backbeat hit
+  (step % 8 == 4) with ≥50% energy in 250 Hz–4 kHz whose midrange level is ≥5 dB above its loop's median.
+  Hits ≤3 steps after a clap that are still mid-heavy carry its room tail ("tainted"). In refs, claps form
+  their own role `clap` (long → its tail rings over the next hits); tainted ref hits stay in the rhythm but
+  get the role that clean hits on the same step position have. In the library, claps are only used for the
+  clap role and tainted/clap slices never for other roles (they carried the pack clap into hats). Library
+  claps whose body (first 50 ms, 12 log bands 300 Hz–5 kHz, above that hats dominate) correlates ≥0.85 with
+  a ref clap are skipped (`service.exclude_ref_clap_copies`, `GenParams.clap_copy_threshold`): on the user's
+  library 80 of 117 claps are skipped, 37 remain in 7 loops; a run of 8 used 7 different clap loops.
 - History: "choppy" feedback at creative 70% = ~9 of 32 hits rewritten per loop + hard 4 ms cuts of
   slices already truncated in dense source loops.
 - **Tail extension** (`generator/tail.py`): if a slice is shorter than the slot it must fill (it was cut by

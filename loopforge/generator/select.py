@@ -155,7 +155,17 @@ def same_type_candidates(profile: RefProfile, role_id: int, table: SliceTable, n
     own = D[role_id]
     nearest_role = np.argmin(D, axis=0)
     role = profile.roles[role_id]
+    is_clap, tainted = table.clap_masks()
     gain_ok = np.abs(role.level_db - table.features[:, FI["peak_db"]]) <= p.gain_clamp_db
+    if role.is_clap:
+        # a clap is replaced by a clap: any detected library clap (the run excludes near-copies of the
+        # refs' own claps), closest first; no radius limit - a *different* clap is the point
+        ok = np.isfinite(own) & is_clap & gain_ok
+        rows = np.nonzero(ok)[0]
+        if len(rows):
+            rows = rows[np.argsort(own[rows], kind="stable")]
+            return _cap_per_file(rows, table, p)
+        # no usable claps in the library: fall back to the closest clap-like (mid-heavy) sounds below
     # must ring like the ref's sound: a quickly-dying "open hat" leaves holes (sounds choppy)
     ref_decay = float(role.mean_features[FI["decay_ms"]])
     ratio = table.features[:, FI["decay_ms"]] / max(ref_decay, 1.0)
@@ -163,15 +173,21 @@ def same_type_candidates(profile: RefProfile, role_id: int, table: SliceTable, n
     # close enough in absolute terms: a sound type the refs don't have (e.g. a rim shot) must not be
     # filed under the nearest ref sound just because it is "least far"
     near = own <= max(role.radius, p.simple_radius_floor) * p.simple_radius_scale
-    ok = np.isfinite(own) & (nearest_role == role_id) & gain_ok & decay_ok & near
+    # hats & co never come from a clap or from a slice carrying a clap's tail (that brings the clap along)
+    ok = np.isfinite(own) & (nearest_role == role_id) & gain_ok & decay_ok & near & ~is_clap & ~tainted
     rows = np.nonzero(ok)[0]
     if len(rows) < p.palette_size:
-        finite = np.nonzero(np.isfinite(own))[0]
+        finite = np.nonzero(np.isfinite(own) & ~is_clap & ~tainted)[0]
         rows = finite[np.argsort(own[finite], kind="stable")[: max(p.palette_size, 4)]]
     rows = rows[np.argsort(own[rows], kind="stable")]
+    return _cap_per_file(rows, table, p)
+
+
+def _cap_per_file(rows: np.ndarray, table: SliceTable, p: GenParams) -> np.ndarray:
+    """Loops repeat the same hit many times: keep at most `simple_per_file` per source file."""
     per_file: dict[int, int] = {}
     keep = []
-    for x in rows:  # loops repeat the same hit many times: cap per source file to spread the pool
+    for x in rows:
         f = int(table.file_idx[x])
         if per_file.get(f, 0) < p.simple_per_file:
             per_file[f] = per_file.get(f, 0) + 1

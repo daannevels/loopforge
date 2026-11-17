@@ -2,7 +2,7 @@
 /* Loopforge UI — vanilla JS, talks to the local Python server (/api/*). */
 
 const $ = (s, el = document) => el.querySelector(s);
-const ROLE_COLORS = { closed: "#4cc9f0", open: "#f5a524", shaker: "#8be36b", perc: "#ff6ad5" };
+const ROLE_COLORS = { clap: "#ff5d5d", closed: "#4cc9f0", open: "#f5a524", shaker: "#8be36b", perc: "#ff6ad5" };
 const roleColor = (name = "") => {
   for (const k in ROLE_COLORS) if (name.startsWith(k)) return ROLE_COLORS[k];
   return "#b9bec8";

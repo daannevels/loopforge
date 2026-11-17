@@ -256,6 +256,14 @@ class SliceTable:
         bad = np.array([f["sha1"] in sha1s for f in self.files], dtype=bool)
         return bad[self.file_idx] if len(self.file_idx) else np.zeros(0, bool)
 
+    def clap_masks(self) -> tuple[np.ndarray, np.ndarray]:
+        """(is_clap, tainted) per slice, see analysis/claps.py. Computed once and cached."""
+        if getattr(self, "_claps", None) is None:
+            from loopforge.analysis.claps import clap_flags
+
+            self._claps = clap_flags(self.features, self.step, self.file_idx)
+        return self._claps
+
     def mask_quiet(self, min_rms_db: float) -> np.ndarray:
         """Boolean mask of slices quieter than `min_rms_db` (near-silent / ghost slices)."""
         from loopforge.models import FEATURE_INDEX

@@ -105,6 +105,34 @@ def write_audition(folder: Path, stem: str, audio: np.ndarray, recipe, ref: RefL
               recipe.sr)
 
 
+def exclude_ref_clap_copies(refs: list[RefLoop], table, exclude: np.ndarray, threshold: float = 0.85) -> int:
+    """Sample packs reuse one clap across many loops. Mark library claps whose body is (nearly) the same
+    sample as a reference clap as excluded, so new loops get a *different* clap. Returns how many."""
+    from loopforge.analysis.claps import clap_flags, clap_signature
+    from loopforge.audio_io import load_region, to_mono
+
+    sigs = []
+    for r in refs:
+        a = r.analysis
+        is_clap, _ = clap_flags(a.features, np.array([s.step for s in a.slices], dtype=np.int64))
+        mono = to_mono(r.audio)
+        sigs += [clap_signature(mono[s.start:s.end], r.sr) for s, c in zip(a.slices, is_clap) if c]
+    if not sigs:
+        return 0
+    R = np.stack(sigs)
+    R = (R - R.mean(1, keepdims=True)) / (R.std(1, keepdims=True) + 1e-12)
+    lib_claps, _ = table.clap_masks()
+    n = 0
+    for i in np.nonzero(lib_claps & ~exclude)[0]:
+        x, sr = load_region(table.path(i), int(table.start[i]), int(table.end[i]))
+        g = clap_signature(to_mono(x), sr)
+        g = (g - g.mean()) / (g.std() + 1e-12)
+        if float((R @ g).max()) / len(g) >= threshold:
+            exclude[i] = True
+            n += 1
+    return n
+
+
 def run_generation(
     req: GenRequest,
     log: Log = _noop,
@@ -141,6 +169,9 @@ def run_generation(
     profile = build_profile(analyses, [r.rms for r in req.refs], space, gp, bpm=gp.bpm)
     refs_info = [r.info() for r in req.refs]
     exclude = selection_mask(table, gp, set() if req.allow_ref_files else {r.sha1 for r in req.refs})
+    n_copies = exclude_ref_clap_copies(req.refs, table, exclude, threshold=gp.clap_copy_threshold)
+    if n_copies:
+        log(f"skipping {n_copies} library claps that sound (nearly) like your references' clap")
     log(f"library: {len(table.files)} files, {len(table)} slices ({int((~exclude).sum())} usable)")
     log("roles: " + ", ".join(f"{r.name} ({r.share:.0%})" for r in profile.roles))
     (out / "profile.json").write_text(json.dumps(profile.summary(), indent=1))

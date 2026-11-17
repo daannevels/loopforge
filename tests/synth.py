@@ -63,13 +63,27 @@ def perc(sr: int = SR, freq: float = 700.0, decay_ms: float = 60.0, seed: int = 
     return _norm(tone + click)
 
 
+def clap(sr: int = SR, seed: int = 4, lo: float = 900.0, hi: float = 2600.0, decay_ms: float = 90.0) -> np.ndarray:
+    """Hand clap: three quick noise bursts then a decaying room tail, band-passed to the midrange."""
+    rng = np.random.default_rng(seed)
+    n = int(sr * 0.35)
+    t = np.arange(n) / sr
+    env = np.zeros(n)
+    for k, d in enumerate((0.0, 0.011, 0.022)):
+        m = t >= d
+        env[m] += (0.6 + 0.2 * k) * np.exp(-(t[m] - d) / 0.004)
+    m = t >= 0.022
+    env[m] += 0.5 * np.exp(-(t[m] - 0.022) / (decay_ms / 1000 / np.log(10)))
+    return _norm(_bp(_noise(n, rng), lo, hi, sr) * env)
+
+
 def click(sr: int = SR) -> np.ndarray:
     x = np.zeros(int(0.005 * sr), np.float32)
     x[:24] = np.hanning(48)[24:] * 0.9
     return x
 
 
-VOICES = {"closed": closed_hat, "open": open_hat, "shaker": shaker, "perc": perc, "click": click}
+VOICES = {"closed": closed_hat, "open": open_hat, "shaker": shaker, "perc": perc, "click": click, "clap": clap}
 
 
 @dataclass

@@ -66,6 +66,7 @@ class GenParams:
     keep_flams: bool = True  # simple mode: keep the ref's flams/rolls (part of its rhythm)
     simple_pool_max: int = 150  # simple mode: max same-type candidates per sound type
     simple_per_file: int = 4  # ... and at most this many from one source file
+    clap_copy_threshold: float = 0.85  # library claps this similar (log-spectrum corr) to a ref clap are skipped
     diversity_top_frac: float = 0.2  # later variations pick randomly among the 20% most-different candidates
     simple_decay_range: tuple[float, float] = (0.6, 2.0)  # candidate decay / ref sound decay
     simple_radius_scale: float = 2.5  # candidates within this x the spread of the ref's own hits
