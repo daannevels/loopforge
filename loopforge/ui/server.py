@@ -91,7 +91,7 @@ class App:
                 except Exception:  # noqa: BLE001 - a stale ref must not block startup
                     pass
         if self.settings.get("library") and Path(self.settings["library"]).is_dir():
-            self._load_index_stats()
+            self._load_index_stats(reindex_if_stale=True)
 
     def _load_last_run(self) -> None:
         runs = self.list_runs()
@@ -178,16 +178,25 @@ class App:
             with self.lock:
                 self.index.update(state="error", error=str(e))
 
-    def _load_index_stats(self) -> None:
-        from loopforge.library import load_slice_table
+    def _load_index_stats(self, reindex_if_stale: bool = False) -> None:
+        from loopforge.library import StaleIndexError, load_slice_table
 
         try:
             st = load_slice_table(self.settings["library"]).stats()
             with self.lock:
                 self.index.update(state="ready", stats=st, current="")
+        except StaleIndexError:
+            # made by an older loopforge version (after an update): rebuild it in the background
+            with self.lock:
+                self.index.update(state="none", stats=None)
+            if reindex_if_stale:
+                self.set_library(self.settings["library"])
         except FileNotFoundError:
             with self.lock:
                 self.index.update(state="none", stats=None)
+        except Exception as e:  # noqa: BLE001 - a broken cache must never stop the app from starting
+            with self.lock:
+                self.index.update(state="error", stats=None, error=f"library index unreadable ({e}); rescan")
 
     # ----- generation -----
     def start_generate(self, opts: dict) -> None:

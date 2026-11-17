@@ -144,6 +144,10 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - Launchers: `Start Loopforge.command` (macOS) / `Start Loopforge.bat` (Windows) install uv if needed,
   `uv sync`, `uv run loopforge ui`.
 
+- **Stale caches**: `load_slice_table` raises `StaleIndexError` when the cache's analyzer_version (or feature
+  blob size) differs from the code. The UI re-indexes automatically on start; `run_generation` re-indexes
+  even with `update_index=False`. (Regression: an update from v2→v3 crashed the app at start-up.)
+
 ## Known limitations
 - Non-loop files with flams ~0.3 step after the beat can be read with flipped even/odd parity
   (shows up as swing ≈ 0.3). Trimmed loops are unaffected (phase fixed at file start).

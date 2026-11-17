@@ -292,11 +292,33 @@ class SliceTable:
         }
 
 
+class StaleIndexError(RuntimeError):
+    """The cache was built by another analyzer version (e.g. after an update); re-index the library."""
+
+
+def index_is_current(root: str | Path, cache: str | Path | None = None,
+                     analyzer_version: int = ANALYZER_VERSION) -> bool:
+    """True if a cache exists and was built by this analyzer version."""
+    cache_path = Path(cache) if cache else default_cache_path(Path(root).resolve())
+    if not cache_path.is_file():
+        return False
+    try:
+        con = sqlite3.connect(str(cache_path))
+        row = con.execute("SELECT value FROM meta WHERE key='analyzer_version'").fetchone()
+        con.close()
+    except sqlite3.Error:
+        return False
+    return row is not None and row[0] == str(analyzer_version)
+
+
 def load_slice_table(root: str | Path, cache: str | Path | None = None) -> SliceTable:
     root = Path(root).resolve()
     cache_path = Path(cache) if cache else default_cache_path(root)
     if not cache_path.is_file():
         raise FileNotFoundError(f"no index at {cache_path}; run `loopforge index {root}` first")
+    if not index_is_current(root, cache):
+        raise StaleIndexError(f"the index at {cache_path} was made by another loopforge version; "
+                              f"re-index with `loopforge index {root}`")
     con = sqlite3.connect(str(cache_path))
     files = []
     fid_to_idx: dict[int, int] = {}
@@ -314,7 +336,10 @@ def load_slice_table(root: str | Path, cache: str | Path | None = None) -> Slice
     n = len(rows)
     feats = np.zeros((n, N_FEATURES), np.float32)
     for i, r in enumerate(rows):
-        feats[i] = np.frombuffer(r[7], dtype=np.float32)
+        v = np.frombuffer(r[7], dtype=np.float32)
+        if v.shape[0] != N_FEATURES:
+            raise StaleIndexError(f"the index at {cache_path} has a different feature layout; re-index the library")
+        feats[i] = v
     col = lambda k, dt: np.array([r[k] for r in rows], dtype=dt)  # noqa: E731
     return SliceTable(
         root=root, features=feats,

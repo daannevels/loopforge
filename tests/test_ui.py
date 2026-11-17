@@ -119,3 +119,35 @@ def test_browse(tmp_path):
     write(tmp_path / "x.wav", render_loop(basic_pattern(1), 120.0, 1))
     d = browse(str(tmp_path))
     assert [c["name"] for c in d["dirs"]] == ["a"] and d["audio_files"] == 1 and d["parent"]
+
+
+def test_app_starts_and_reindexes_with_index_from_older_version(tmp_path):
+    """Regression: after an update the cached library index (older analyzer, fewer features) crashed startup."""
+    import sqlite3
+
+    import numpy as np
+
+    from loopforge.library import default_cache_path, load_slice_table, update_index
+    from loopforge.library.index import StaleIndexError
+
+    lib = tmp_path / "lib"
+    write(lib / "hats_124bpm.wav", render_loop(basic_pattern(2), 124.0, 2))
+    update_index(lib, jobs=1)
+    con = sqlite3.connect(default_cache_path(lib))  # turn it into an "old version" cache
+    con.execute("UPDATE meta SET value='2' WHERE key='analyzer_version'")
+    for sid, blob in con.execute("SELECT id, features FROM slices").fetchall():
+        con.execute("UPDATE slices SET features=? WHERE id=?", (np.frombuffer(blob, np.float32)[:-1].tobytes(), sid))
+    con.commit()
+    con.close()
+    with pytest.raises(StaleIndexError):
+        load_slice_table(lib)
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "settings.json").write_text(json.dumps({"library": str(lib)}))
+    app = App(ws, jobs=1)  # must not raise
+    t0 = time.time()
+    while app.state()["index"]["state"] != "ready" and time.time() - t0 < 60:
+        time.sleep(0.2)
+    assert app.state()["index"]["state"] == "ready"
+    assert len(load_slice_table(lib)) > 0

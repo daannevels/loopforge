@@ -144,7 +144,7 @@ def run_generation(
     from loopforge.diagnostics import evaluate_output, generation_report, plot_analysis, timbre_stats
     from loopforge.generator.profile import build_profile
     from loopforge.generator.run import generate_one, selection_mask
-    from loopforge.library import FeatureSpace, NearestNeighbors, load_slice_table, update_index
+    from loopforge.library import FeatureSpace, NearestNeighbors, StaleIndexError, load_slice_table, update_index
     from loopforge.library.slices import recipe_loader
 
     if not req.refs:
@@ -159,7 +159,12 @@ def run_generation(
     if req.update_index:
         log("updating library index…")
         update_index(req.library, cache=req.cache, params=req.aparams, jobs=req.jobs)
-    table = load_slice_table(req.library, req.cache)
+    try:
+        table = load_slice_table(req.library, req.cache)
+    except StaleIndexError:  # index from an older version and the caller skipped the update: rebuild now
+        log("library index is from an older version: re-indexing…")
+        update_index(req.library, cache=req.cache, params=req.aparams, jobs=req.jobs)
+        table = load_slice_table(req.library, req.cache)
     if len(table) == 0:
         raise ValueError("the library index is empty — pick a folder with wav/aiff/flac loops")
     space = FeatureSpace.fit(table.features, group_weights=dict(gp.timbre_group_weights))
