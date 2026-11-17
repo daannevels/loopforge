@@ -40,7 +40,7 @@ def make_slices(
     """Slice at onsets. Returns (slices, swing, grid_offset, steps_total)."""
     onsets = np.asarray(onset_samples, dtype=np.int64)
     steps_per_bar = p.beats_per_bar * p.steps_per_beat
-    steps_total = tempo.bars * steps_per_bar
+    steps_total = (tempo.beats * p.steps_per_beat) if tempo.beats else tempo.bars * steps_per_bar
     if len(onsets) == 0:
         return [], 0.0, 0.0, steps_total
 

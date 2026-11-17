@@ -62,3 +62,22 @@ def file_sha1(path: str | Path, chunk: int = 1 << 20) -> str:
         while block := f.read(chunk):
             h.update(block)
     return h.hexdigest()
+
+
+def load_region(path: str | Path, start: int, end: int) -> tuple[np.ndarray, int]:
+    """Load samples [start, end) of a file as float32 (channels, samples) without reading the rest."""
+    data, sr = sf.read(str(path), start=int(start), stop=int(end), dtype="float32", always_2d=True)
+    return np.ascontiguousarray(data.T), int(sr)
+
+
+def apply_fades(x: np.ndarray, sr: int, fade_in_s: float = 0.0, fade_out_s: float = 0.005) -> np.ndarray:
+    """Linear fade-in / fade-out along the last axis (returns a copy)."""
+    y = np.array(x, dtype=np.float32, copy=True)
+    n = y.shape[-1]
+    fi = min(n, int(round(fade_in_s * sr)))
+    fo = min(n, int(round(fade_out_s * sr)))
+    if fi > 1:
+        y[..., :fi] *= np.linspace(0.0, 1.0, fi, dtype=np.float32)
+    if fo > 1:
+        y[..., n - fo :] *= np.linspace(1.0, 0.0, fo, dtype=np.float32)
+    return y

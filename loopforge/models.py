@@ -23,7 +23,8 @@ FEATURE_SPEC: tuple[tuple[str, str], ...] = (
     ("band_low", "bands"),
     ("band_mid", "bands"),
     ("band_high", "bands"),
-    *((f"mfcc_{i}", "mfcc") for i in range(13)),
+    ("mfcc_0", "loudness"),  # c0 is log energy: gain-dependent, so not part of timbre
+    *((f"mfcc_{i}", "mfcc") for i in range(1, 13)),
 )
 FEATURE_NAMES: tuple[str, ...] = tuple(n for n, _ in FEATURE_SPEC)
 FEATURE_INDEX: dict[str, int] = {n: i for i, n in enumerate(FEATURE_NAMES)}
@@ -38,6 +39,7 @@ class TempoEstimate:
     confidence: float  # 0..1 (grid alignment score)
     is_loop: bool  # file length is an exact number of bars
     phase_s: float = 0.0  # time of the first downbeat
+    beats: int = 0  # whole beats covered (loop length in beats if is_loop; may be < bars * 4)
 
     def step_len_s(self, steps_per_beat: int = 4) -> float:
         return 60.0 / self.bpm / steps_per_beat

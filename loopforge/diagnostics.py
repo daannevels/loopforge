@@ -109,6 +109,14 @@ def analysis_table(a: LoopAnalysis) -> str:
     return "\n".join("  ".join(v.rjust(w) for v, w in zip(r, widths)) for r in rows)
 
 
+def _len_label(t) -> str:
+    if not t.is_loop:
+        return f"{t.beats} beats (NOT a whole number of beats; treated as non-looping)"
+    if t.beats and t.beats % 4:
+        return f"{t.beats} beats = {t.beats / 4:g} bars (exact loop)"
+    return f"{t.bars} bars (exact loop)"
+
+
 def analysis_summary(a: LoopAnalysis) -> str:
     t = a.tempo
     from collections import Counter
@@ -119,8 +127,7 @@ def analysis_summary(a: LoopAnalysis) -> str:
         f"file        {a.name}",
         f"format      {a.sr} Hz, {a.channels} ch, {a.duration_s:.4f} s ({a.n_samples} samples)",
         f"tempo       {t.bpm:.3f} BPM  [method={t.method}, grid confidence={t.confidence:.2f}]",
-        f"length      {t.bars} bars{' (exact loop)' if t.is_loop else ' (NOT a whole number of bars)'}, "
-        f"{a.steps_total} steps",
+        f"length      {_len_label(t)}, {a.steps_total} steps",
         f"swing       {a.swing:.3f} steps (0 = straight, 0.33 = triplet feel)",
         f"grid offset {a.grid_offset:+.3f} steps",
         f"slices      {len(a.slices)} ({density:.1f} per bar)  roles: "

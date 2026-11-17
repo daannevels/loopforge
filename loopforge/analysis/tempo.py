@@ -37,6 +37,7 @@ def bpm_from_name(name: str) -> float | None:
 
 
 SWING_PENALTY = 0.3
+BEAT_LOOP_TOLERANCE_S = 0.005
 
 
 def swing_from_positions(pos: np.ndarray, min_hits: int = 3) -> float:
@@ -78,14 +79,20 @@ def grid_score(
     return score, swing, lat
 
 
-def _bar_fit(dur_s: float, bpm: float, p: AnalysisParams) -> tuple[int, bool]:
-    bar_s = p.beats_per_bar * 60.0 / bpm
-    bars = int(round(dur_s / bar_s))
+def _bar_fit(dur_s: float, bpm: float, p: AnalysisParams) -> tuple[int, int, bool]:
+    """(bars, beats, is_loop). A loop is a whole number of beats (>= 2), e.g. 4 bars or 10 beats."""
+    beat_s = 60.0 / bpm
+    bar_s = p.beats_per_bar * beat_s
     tol = max(p.loop_tolerance_s, p.loop_tolerance_bar_frac * bar_s)
-    is_loop = bars >= 1 and abs(dur_s - bars * bar_s) <= tol
+    beats = int(round(dur_s / beat_s))
+    err = abs(dur_s - beats * beat_s)
+    if beats % p.beats_per_bar:
+        tol = min(tol, BEAT_LOOP_TOLERANCE_S)  # odd lengths must be tighter to count as loops
+    is_loop = beats >= 2 and err <= tol
     if not is_loop:
-        bars = max(1, int(np.floor(dur_s / bar_s + 1e-6)))
-    return bars, is_loop
+        beats = int(np.floor(dur_s / beat_s + 1e-6))
+    bars = max(1, beats // p.beats_per_bar)
+    return bars, beats, is_loop
 
 
 def _snap_bpm(bpm: float, dur_s: float, p: AnalysisParams) -> float:
@@ -142,15 +149,17 @@ def estimate_tempo(
         w = np.ones_like(t)
 
     def from_bpm(bpm: float, method: str) -> TempoEstimate:
-        bars, is_loop = _bar_fit(dur, bpm, p)
+        bars, beats, is_loop = _bar_fit(dur, bpm, p)
         step_s = 60.0 / bpm / p.steps_per_beat
+        score, phase = 0.0, 0.0
         if is_loop:
-            score, _, _ = grid_score(t, w, step_s, 0.0)
-            phase = 0.0
-        else:
+            score, _, lat = grid_score(t, w, step_s, 0.0)
+            if beats % p.beats_per_bar and (score < p.min_grid_score or abs(lat) > 0.15):
+                is_loop = False  # whole beats by coincidence; onsets do not sit on a grid from t=0
+        if not is_loop:
             score, phase = _best_phase(t, w, step_s)
         return TempoEstimate(bpm=float(bpm), bars=bars, method=method, confidence=round(score, 4),
-                             is_loop=is_loop, phase_s=phase)
+                             is_loop=is_loop, phase_s=phase, beats=beats)
 
     if manual_bpm:
         return from_bpm(float(manual_bpm), "manual")
@@ -169,7 +178,8 @@ def estimate_tempo(
             step_s = 60.0 / bpm / p.steps_per_beat
             sc, _, _ = grid_score(t, w, step_s, 0.0)
             cands.append(TempoEstimate(bpm=float(bpm), bars=nb, method="duration",
-                                       confidence=round(sc, 4), is_loop=True, phase_s=0.0))
+                                       confidence=round(sc, 4), is_loop=True, phase_s=0.0,
+                                       beats=nb * p.beats_per_bar))
     if cands:
         centre = np.sqrt(p.bpm_min * p.bpm_max)
         top = max(c.confidence for c in cands)
@@ -182,6 +192,6 @@ def estimate_tempo(
     sc, bpm, _ = _search(t, w, p, p.bpm_min, p.bpm_max, 0.5, 24, fixed_phase=False)
     sc, bpm, phase = _search(t, w, p, max(p.bpm_min, bpm - 0.6), min(p.bpm_max, bpm + 0.6), 0.02, 64,
                              fixed_phase=False)
-    bars, is_loop = _bar_fit(dur, bpm, p)
+    bars, beats, _ = _bar_fit(dur, bpm, p)
     return TempoEstimate(bpm=round(bpm, 3), bars=bars, method="autocorr", confidence=round(sc, 4),
-                         is_loop=False, phase_s=phase)
+                         is_loop=False, phase_s=phase, beats=beats)

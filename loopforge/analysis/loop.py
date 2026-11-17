@@ -36,7 +36,7 @@ def analyze_loop(
     if tempo.is_loop:
         ons = detect_onsets(mono, sr, p, circular=True)
     else:
-        notes.append("file is not a whole number of bars; treated as non-looping")
+        notes.append("file is not a whole number of beats; treated as non-looping")
     if tempo.confidence < p.min_grid_score:
         notes.append(f"low grid confidence ({tempo.confidence:.2f}); consider --bpm")
 

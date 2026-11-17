@@ -8,6 +8,8 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - `uv sync` — install (Python ≥3.11; dev runs on 3.13)
 - `uv run pytest` — tests (synthetic audio only)
 - `uv run loopforge analyze <loop.wav> [--bpm X] [--out-dir D] [--json]`
+- `uv run loopforge index <library> [--jobs N] [--cache PATH]`
+- `uv run loopforge neighbors <loop|one-shot> --library <dir> [--k 10] [--slice i ...] [--export DIR]`
 
 ## Conventions
 - Audio inside the engine is float32 shaped `(channels, samples)`; mono analysis via `audio_io.to_mono`.
@@ -21,6 +23,9 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - Commit after each milestone; wait for user confirmation before starting the next one.
 
 ## Key decisions
+- **Loop length**: a file is a loop when it is a whole number of *beats* (≥2), not only whole bars
+  (e.g. a 10-beat loop). Odd-beat lengths need ≤5 ms error, a good grid score at phase 0 and
+  |latency| < 0.15 step, otherwise they are treated as non-loops.
 - **Tempo** precedence: manual → filename (`145 BPM`, `124bpm`, validated: must fit the length as a loop or
   align with the grid) → duration fit (N∈{1,2,4,8,16} bars giving a BPM inside 100–150, checked by grid
   alignment score) → BPM×phase grid search for non-loops. BPM is snapped to a round value when that changes
@@ -37,6 +42,18 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   extrapolated from the dB envelope when the slice is cut by the next hit), duration, centroid/rolloff/
   flatness (energy-weighted, ≤20 kHz), band ratios (<250, 250–4k, >4k Hz), 13 MFCC means (40 mels,
   fmax 16 kHz, energy-weighted). Fixed fmax values make 44.1k and 48k material comparable.
+- **Library index** (`library/index.py`): SQLite at `<library>/.loopforge/index.sqlite`. Tables
+  `files` (rel path, size, mtime_ns, sha1, tempo info, error) + `slices` (positions, step, role, float32
+  feature blob). Skip if size+mtime unchanged; if mtime changed but sha1 equal → metadata refresh only;
+  else re-analyse. Analyzer version or analysis params change → full rebuild. Hidden dirs/files and macOS
+  `._*` files are skipped; unreadable files are recorded with `error` and skipped. Parallel workers use the
+  `spawn` start method. Slice audio is re-read from the source (`library/slices.py`), never cached.
+- **Timbre space** (`library/search.py`): log2 for centroid/rolloff, log1p for times, log for flatness,
+  z-score over the library, then group weights (each group's weight shared by its members so 12 MFCCs don't
+  dominate): loudness 0 (gain matched later; `mfcc_0` counts as loudness), envelope 1, spectral 1,
+  bands 0.7, mfcc 1; `duration_ms` ×0.3 (it mostly reflects pattern density). Brute-force Euclidean kNN.
+  `query_diverse` caps results per source file and skips near-duplicates (repeated identical hits).
+  Library slices below −50 dB RMS are excluded from search; refs' own files are excluded by sha1.
 - **Role** labels (`closed/open/shaker/perc`) in analysis are a heuristic for diagnostics only; the
   generator will derive roles by clustering reference slices (M3).
 - **Stereo**: slices keep their original stereo image; mono sources are centred. Features use mono sum.
@@ -50,5 +67,5 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - Downbeat of non-loop files is not detected (grid phase only).
 
 ## Milestones
-M1 analysis + `analyze` ✅ · M2 library index + `neighbors` · M3 generator v1 · M4 similarity/novelty/
+M1 analysis + `analyze` ✅ · M2 library index + `neighbors` ✅ · M3 generator v1 · M4 similarity/novelty/
 variations · M5 Gradio listening UI.

@@ -4,7 +4,7 @@ import pytest
 from loopforge.analysis.loop import analyze_loop
 from loopforge.analysis.tempo import bpm_from_name
 from loopforge.config import AnalysisParams
-from tests.synth import SR, Hit, basic_pattern, render_loop
+from tests.synth import SR, Hit, basic_pattern, render_loop, sparse_pattern
 
 
 @pytest.mark.parametrize("bpm", [100.0, 112.0, 124.0, 133.3, 140.0, 145.0, 150.0])
@@ -76,3 +76,23 @@ def test_custom_range():
     p = AnalysisParams(bpm_min=80.0, bpm_max=115.0)
     a = analyze_loop(x, SR, name="loop.wav", params=p)
     assert abs(a.tempo.bpm - 87.0) < 0.5
+
+
+def test_whole_beat_loop_10_beats():
+    hits = basic_pattern(3)[:40]  # 10 beats
+    bpm = 145.0
+    x = render_loop(hits, bpm, 3)
+    x = x[:, : int(round(10 * 60 / bpm * SR))]
+    a = analyze_loop(x, SR, name="top_145bpm.wav")
+    assert a.tempo.is_loop and a.tempo.beats == 10 and a.steps_total == 40
+    assert a.slices[0].start == 0
+
+
+def test_whole_beat_coincidence_not_a_loop():
+    # 6 beats long but onsets start half a step late -> not a grid-aligned loop
+    bpm = 120.0
+    hits = sparse_pattern([0, 2, 4, 6, 8, 10, 12, 14], "closed", bars=2)
+    x = render_loop(hits, bpm, 2, circular=False, pre_silence_s=0.5 * 60 / bpm / 4)
+    x = x[:, : int(round(6 * 60 / bpm * SR))]
+    a = analyze_loop(x, SR, name="x_120bpm.wav")
+    assert not a.tempo.is_loop
