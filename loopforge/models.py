@@ -23,7 +23,6 @@ FEATURE_SPEC: tuple[tuple[str, str], ...] = (
     ("band_low", "bands"),
     ("band_mid", "bands"),
     ("band_high", "bands"),
-    ("tonal_db", "class"),  # pitch-peak strength 100-1200 Hz (tonal percs); used by the instrument scan only
     ("mfcc_0", "loudness"),  # c0 is log energy: gain-dependent, so not part of timbre
     *((f"mfcc_{i}", "mfcc") for i in range(1, 13)),
 )

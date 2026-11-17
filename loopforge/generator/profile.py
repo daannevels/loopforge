@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.cluster.vq import kmeans2
 
-from loopforge.analysis.instruments import BACKBEAT_SNARE_CLAP, CLASSES, TAIL
+from loopforge.analysis.claps import clap_flags
+from loopforge.analysis.features import describe_role
 from loopforge.config import GenParams
 from loopforge.library.search import FeatureSpace
 from loopforge.models import FEATURE_INDEX, LoopAnalysis
@@ -32,8 +33,7 @@ class Role:
     share: float  # fraction of reference hits
     n: int
     radius: float = float("inf")  # 90th-pct distance of the ref's own hits to the centroid (timbre spread)
-    is_clap: bool = False  # clap or snare: its room tail rings on; copies of the ref's own are skipped
-    instrument: str = ""  # instrument class from the scan (analysis/instruments.py)
+    is_clap: bool = False  # backbeat clap: replaced only by library claps (analysis/claps.py)
 
     def to_dict(self) -> dict:
         fi = FEATURE_INDEX
@@ -43,7 +43,7 @@ class Role:
             "level_db": round(self.level_db, 2), "level_std": round(self.level_std, 2), "long": self.long,
             "centroid_hz": round(float(f[fi["centroid_hz"]]), 1), "decay_ms": round(float(f[fi["decay_ms"]]), 1),
             "attack_ms": round(float(f[fi["attack_ms"]]), 1), "band_high": round(float(f[fi["band_high"]]), 3),
-            "radius": round(self.radius, 3) if np.isfinite(self.radius) else None, "instrument": self.instrument,
+            "radius": round(self.radius, 3) if np.isfinite(self.radius) else None, "is_clap": self.is_clap,
         }
 
 
@@ -185,16 +185,17 @@ def build_profile(
     srs = [a.sr for a in analyses]
     sr = max(set(srs), key=srs.count)
 
-    # Collect usable hits (primary per step + flam/roll sub-hits). Every hit already carries its
-    # instrument from the scan (analysis/instruments.py); each instrument found in the refs becomes one
-    # sound type, so a ref with only open + closed hats only ever gets open + closed hats. Hits that are a
-    # clap/snare's room tail stay in the rhythm with the instrument clean hits on that step position have;
-    # the new clap/snare rings over them like the original did.
+    # Collect usable hits (primary per step + flam/roll sub-hits). Claps (backbeat, mid-heavy) become
+    # their own sound type. Hits right after a clap carry its room tail; they stay in the rhythm but are
+    # not clustered on their (clap-coloured) sound - they get the sound type that clean hits on the same
+    # step position have, and the new clap rings over them like the original did.
     rows: list[tuple[int, int, float, float]] = []  # (ref, slice idx, sub_offset, peak_db)
     feats: list[np.ndarray] = []
-    inst_row: list[str] = []
+    clap_row: list[bool] = []
+    tail_row: list[bool] = []
     pos_row: list[int] = []
     for ai, a in enumerate(analyses):
+        is_clap, tainted = clap_flags(a.features, np.array([s.step for s in a.slices], dtype=np.int64))
         by_step: dict[int, list[int]] = {}
         for i, s in enumerate(a.slices):
             if a.features[i, fi["rms_db"]] < params.min_slice_rms_db:
@@ -209,46 +210,52 @@ def build_profile(
                     continue
                 rows.append((ai, i, sub, float(a.features[i, fi["peak_db"]])))
                 feats.append(a.features[i])
-                inst_row.append(a.slices[i].role if a.slices[i].role in CLASSES + (TAIL,) else "other")
+                clap_row.append(bool(is_clap[i]))
+                tail_row.append(bool(tainted[i]))
                 pos_row.append(int(a.slices[i].step) % 16)
     if not rows:
         raise ValueError("references contain no usable hits")
     F = np.stack(feats)
     E = space.embed(F)
-    inst = np.array(inst_row, dtype=object)
+    clap = np.array(clap_row, dtype=bool)
+    tail = np.array(tail_row, dtype=bool) & ~clap
     pos = np.array(pos_row, dtype=np.int64)
-    tail = inst == TAIL
-    if tail.all():
-        inst[:] = "other"
-        tail[:] = False
-    present = [c for c in CLASSES if (inst == c).any()]
-    labels = np.array([present.index(c) if c != TAIL else -1 for c in inst], dtype=np.int64)
-    clean = ~tail
-    C = np.stack([E[labels == k].mean(axis=0) for k in range(len(present))])
-    for i in np.nonzero(tail)[0]:
-        # what clean hits on this step position are, excluding the clap/snare itself
-        same = clean & (pos == pos[i]) & ~np.isin(inst, BACKBEAT_SNARE_CLAP)
-        if same.any():
-            labels[i] = int(np.bincount(labels[same], minlength=len(present)).argmax())
-        else:
-            cand = [k for k, c in enumerate(present) if c not in BACKBEAT_SNARE_CLAP] or list(range(len(present)))
-            labels[i] = min(cand, key=lambda k: float(((C[k] - E[i]) ** 2).sum()))
+    clean = ~clap & ~tail
+    if not clean.any():  # degenerate: everything is clap tail; cluster them anyway
+        clean, tail = ~clap, np.zeros_like(tail)
+    labels = np.zeros(len(rows), np.int64)
+    n_roles = 0
+    if clean.any():
+        labels[clean] = cluster_roles(E[clean], params.max_roles, params.min_silhouette,
+                                      min_share=params.role_min_share, rel_sil=params.role_rel_silhouette)
+        n_roles = int(labels[clean].max()) + 1
+        C = np.stack([E[clean & (labels == k)].mean(axis=0) for k in range(n_roles)])
+        for i in np.nonzero(tail)[0]:
+            same_pos = clean & (pos == pos[i])
+            if same_pos.any():  # what clean hits on this step position are
+                labels[i] = int(np.bincount(labels[same_pos], minlength=n_roles).argmax())
+            else:
+                labels[i] = int(np.argmin(((C - E[i]) ** 2).sum(axis=1)))
+    if clap.any():
+        labels[clap] = n_roles
+        n_roles += 1
     peaks = np.array([r[3] for r in rows])
 
     roles: list[Role] = []
-    for k, name in enumerate(present):
+    for k in range(n_roles):
         m_all = labels == k
-        m = m_all & clean if (m_all & clean).any() else m_all  # describe roles by their own clean hits
+        m = m_all & ~tail if (m_all & ~tail).any() else m_all  # describe roles by their clean hits
+        is_clap_role = bool(clap[m_all].all())
         mean_f = F[m].mean(axis=0)
-        drum = name in BACKBEAT_SNARE_CLAP
+        name = "clap" if is_clap_role else f"{describe_role(mean_f)}{k}"
         roles.append(Role(
             id=k, name=name, centroid=E[m].mean(axis=0), mean_features=mean_f,
             level_db=float(peaks[m].mean()), level_std=float(peaks[m].std()) if m.sum() > 1 else 1.0,
-            long=drum or bool(np.median(F[m, fi["decay_ms"]]) > params.long_role_decay_ms),
+            long=is_clap_role or bool(np.median(F[m, fi["decay_ms"]]) > params.long_role_decay_ms),
             share=float(m_all.mean()), n=int(m_all.sum()),
             radius=float(np.percentile(np.sqrt(((E[m] - E[m].mean(axis=0)) ** 2).sum(axis=1)), 90)) if m.sum() > 1
             else float("inf"),
-            is_clap=drum, instrument=name,
+            is_clap=is_clap_role,
         ))
 
     # Templates on the output grid.
@@ -273,7 +280,7 @@ def build_profile(
                 names.append(label)
 
     onset = np.zeros(n_steps)
-    role_counts = np.zeros((n_steps, len(roles)))
+    role_counts = np.zeros((n_steps, n_roles))
     accent_sum = np.zeros(n_steps)
     accent_n = np.zeros(n_steps)
     for t in templates:

@@ -44,7 +44,7 @@ def open_hat(sr: int = SR, decay_ms: float = 300.0, seed: int = 1) -> np.ndarray
     return closed_hat(sr, decay_ms=decay_ms, seed=seed, cutoff=6000.0)
 
 
-def shaker(sr: int = SR, attack_ms: float = 25.0, decay_ms: float = 30.0, seed: int = 2) -> np.ndarray:
+def shaker(sr: int = SR, attack_ms: float = 18.0, decay_ms: float = 70.0, seed: int = 2) -> np.ndarray:
     rng = np.random.default_rng(seed)
     n = int(sr * (attack_ms + decay_ms * 4) / 1000)
     t = np.arange(n) / sr
@@ -69,21 +69,11 @@ def clap(sr: int = SR, seed: int = 4, lo: float = 900.0, hi: float = 2600.0, dec
     n = int(sr * 0.35)
     t = np.arange(n) / sr
     env = np.zeros(n)
-    for amp, d in ((0.7, 0.0), (0.85, 0.008), (1.0, 0.017)):  # hand bursts ~8 ms apart, the last is loudest
+    for k, d in enumerate((0.0, 0.011, 0.022)):
         m = t >= d
-        env[m] += amp * np.exp(-(t[m] - d) / 0.003)
-    m = t >= 0.017
-    env[m] += 0.45 * np.exp(-(t[m] - 0.017) / (decay_ms / 1000 / np.log(10)))
-    return _norm(_bp(_noise(n, rng), lo, hi, sr) * env)
-
-
-def snare(sr: int = SR, seed: int = 5, decay_ms: float = 110.0, lo: float = 1000.0, hi: float = 5000.0) -> np.ndarray:
-    """High-passed snare as heard in top loops: one sharp stick transient + noisy wires (1-5 kHz)."""
-    rng = np.random.default_rng(seed)
-    n = int(sr * 0.3)
-    t = np.arange(n) / sr
-    env = np.exp(-t / (decay_ms / 1000 / np.log(10)))
-    env[: int(0.0005 * sr)] *= np.linspace(0, 1, int(0.0005 * sr))
+        env[m] += (0.6 + 0.2 * k) * np.exp(-(t[m] - d) / 0.004)
+    m = t >= 0.022
+    env[m] += 0.5 * np.exp(-(t[m] - 0.022) / (decay_ms / 1000 / np.log(10)))
     return _norm(_bp(_noise(n, rng), lo, hi, sr) * env)
 
 
@@ -93,7 +83,7 @@ def click(sr: int = SR) -> np.ndarray:
     return x
 
 
-VOICES = {"closed": closed_hat, "open": open_hat, "shaker": shaker, "perc": perc, "click": click, "clap": clap, "snare": snare}
+VOICES = {"closed": closed_hat, "open": open_hat, "shaker": shaker, "perc": perc, "click": click, "clap": clap}
 
 
 @dataclass

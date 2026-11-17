@@ -65,27 +65,9 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   `select.build_palettes` + `assign_slices` → `run.generate_one` builds a `Recipe` → `recipe.render_recipe`.
   The renderer takes an injected `SliceLoader` (no I/O in the engine); `generate` and `render` use the same
   code path, so a recipe re-renders bit-identically.
-- **Instrument scan** (`analysis/instruments.py`, ANALYZER_VERSION 3): every hit of every loop (refs and
-  library) gets a class stored as the slice `role`: closed_hat, open_hat, shaker, clap, snare, perc, other,
-  or `tail`. Rules: band_low ≥ 0.35 → other; midrange-heavy (band_mid ≥ 0.5, or centroid < 4 kHz and
-  band_high < 0.5) and tonal (`tonal_db` ≥ 25: biggest 100 Hz–3 kHz spectral peak vs. a ~300 Hz moving
-  median, weighted by band energy) → perc; midrange-heavy noise → clap or snare, decided per loop from its
-  backbeat hits that stand out ≥5 dB in midrange level: median attack ≥ 8 ms = clap (several hand bursts,
-  late peak), else snare (one stick transient); ghost notes take the loop's choice; noisy-mid hits 1–3 steps
-  after one and ≥8 dB quieter = `tail`. Bright hits: attack ≥ 15 ms & decay < 130 ms → shaker, decay ≥ 130 →
-  open_hat, else closed_hat. Snare "body" (150–500 Hz) is useless: top loops are high-passed.
-  Verified on the user's refs: 01 = clap + tonal percs + hats, 04 = hats + snare, 05 = hats + shaker +
-  snare pattern (backbeat with flam + ghosts on 7/15). Synthetic claps get split by the onset detector, so
-  clap/shaker rules are unit-tested on measured feature values instead of synthetic audio.
-- **Roles = instruments found in the refs** (no k-means any more; `cluster_roles` is unused). A ref with only
-  hats gets only hats. `tail` ref hits keep their place and take the instrument clean hits have on that step
-  position. Clap/snare roles are `long` (tail rings on). Library candidates must have the SAME instrument
-  label, are never `tainted` (`instruments.tainted_mask`: ≤3 steps after a clap/snare and mid-heavy — that
-  carried the pack clap into hats), need ≤12 dB gain, and (non-drums) decay 0.6–2× the ref's; constraints
-  relax step by step if too few. Library claps/snares whose body sounds like a ref clap/snare (log-spectrum
-  corr ≥ 0.85, `service.exclude_ref_clap_copies`) are skipped.
-  Real data (8 variations per ref): 0 hits with a different instrument; ref 05's snares from 7 loops
-  (max similarity to the original 0.80), ref 01's claps from 4 loops, ref 04's snares from 6 loops.
+- **Roles**: k-means over all ref hits in the *generation* timbre space (envelope ×3, MFCC ×0.5 —
+  `GenParams.timbre_group_weights`; closed vs. open hats is mostly decay). Pick the LARGEST k (≤6) with
+  silhouette ≥ 0.6×best; clusters < 3% of hits fold into the nearest. Role `long` = median decay > 120 ms.
 - **Profile**: refs are cut (or tiled) into templates of the output length; per step: onset prob, role
   distribution, accent (dB vs. role level). Flams (2nd hit ≥0.1 step later on the same step) are kept as
   sub-hits.
@@ -93,8 +75,11 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   section (same steps, sound type and level per hit, the ref's own flams; empty steps stay empty). No swing,
   no similarity knob (fixed 1.0). UI/CLI expose Variations, Palette, Length, Seed (random per run unless
   locked). `creative` (M3 mutation/palette/swing engine) stays in code, hidden (`--mode creative`).
-- **Simple-mode sound choice** (`select.same_type_candidates` + `choose_role_samples`): same instrument
-  label (see Instrument scan), pool = closest 150, max 4 per source file (loops repeat the same hit). Each variation picks `palette_size` (default 1) per sound type,
+- **Simple-mode sound choice** (`select.same_type_candidates` + `choose_role_samples`): a library hit is
+  "the same sound type" as ref role R when it is nearer to R's centroid than to any other ref role, within
+  2× the spread (90th-pct radius) of the ref's own R hits, decays at 0.6–2× R's decay (a fast-dying "open
+  hat" sounds choppy), and needs ≤12 dB gain. Pool = closest 150 within 2.5× the ref spread, max 4 per
+  source file (loops repeat the same hit). Each variation picks `palette_size` (default 1) per sound type,
   preferring samples AND files unused by earlier variations of the run (`RunMemory`), never sharing a
   sample between roles. Variation 1 picks uniformly at random; later ones pick at random among the 20% of
   candidates that are MOST different (max-min timbre distance) from what earlier variations used for that
@@ -106,8 +91,15 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
   Palette > 1 mixes the extra samples in by weights .55/.3/.15/.1, repeats allowed.
   Measured on the user's refs/library (3 seeds × 8): 32–33 distinct samples per run, none reused,
   22 of 24 usable files; level dip between 16ths 15.0–15.6 dB median / 21.8–23.5 dB p90 (refs 16.4 / 27.7).
-- **Claps/snares history**: user heard the original clap in new loops: 80 of 117 library claps were (near)
-  copies of the pack clap, and hats taken right after a clap carried its tail. Fixed by the scan above.
+- **Claps** (`analysis/claps.py`, user feedback "the original clap is still there"): a clap = backbeat hit
+  (step % 8 == 4) with ≥50% energy in 250 Hz–4 kHz whose midrange level is ≥5 dB above its loop's median.
+  Hits ≤3 steps after a clap that are still mid-heavy carry its room tail ("tainted"). In refs, claps form
+  their own role `clap` (long → its tail rings over the next hits); tainted ref hits stay in the rhythm but
+  get the role that clean hits on the same step position have. In the library, claps are only used for the
+  clap role and tainted/clap slices never for other roles (they carried the pack clap into hats). Library
+  claps whose body (first 50 ms, 12 log bands 300 Hz–5 kHz, above that hats dominate) correlates ≥0.85 with
+  a ref clap are skipped (`service.exclude_ref_clap_copies`, `GenParams.clap_copy_threshold`): on the user's
+  library 80 of 117 claps are skipped, 37 remain in 7 loops; a run of 8 used 7 different clap loops.
 - History: "choppy" feedback at creative 70% = ~9 of 32 hits rewritten per loop + hard 4 ms cuts of
   slices already truncated in dense source loops.
 - **Tail extension** (`generator/tail.py`): if a slice is shorter than the slot it must fill (it was cut by
@@ -144,8 +136,12 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - Launchers: `Start Loopforge.command` (macOS) / `Start Loopforge.bat` (Windows) install uv if needed,
   `uv sync`, `uv run loopforge ui`.
 
-- **Stale caches**: `load_slice_table` raises `StaleIndexError` when the cache's analyzer_version (or feature
-  blob size) differs from the code. The UI re-indexes automatically on start; `run_generation` re-indexes
+- **Instrument scan (snare/perc/hat classes per hit) was tried and REVERTED at the user's request**: it marked
+  darker hats as claps (all noisy-midrange hits of a loop took the loop's clap/snare label) and the user
+  preferred the clap-only version. Claps are only detected on the backbeat (`analysis/claps.py`).
+- **Stale caches**: `load_slice_table` raises `StaleIndexError` when the cache's analyzer_version or
+  `n_features` (stored in meta) differs from the code, or a feature blob has the wrong size; `update_index`
+  rebuilds fully on those, and `force=True` rebuilds regardless. The UI re-indexes automatically on start; `run_generation` re-indexes
   even with `update_index=False`. (Regression: an update from v2→v3 crashed the app at start-up.)
 
 ## Known limitations

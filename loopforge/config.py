@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 
 # Bump whenever analysis output changes in a way that invalidates cached
 # library indexes (slicing, features, tempo logic).
-ANALYZER_VERSION = 3  # v3: tonal_db feature + instrument scan labels
+ANALYZER_VERSION = 2  # v2: loops may be a whole number of beats
 
 
 @dataclass(frozen=True)

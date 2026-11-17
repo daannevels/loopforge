@@ -134,7 +134,8 @@ def test_app_starts_and_reindexes_with_index_from_older_version(tmp_path):
     write(lib / "hats_124bpm.wav", render_loop(basic_pattern(2), 124.0, 2))
     update_index(lib, jobs=1)
     con = sqlite3.connect(default_cache_path(lib))  # turn it into an "old version" cache
-    con.execute("UPDATE meta SET value='2' WHERE key='analyzer_version'")
+    con.execute("UPDATE meta SET value='3' WHERE key='analyzer_version'")  # like the user's cache
+    con.execute("UPDATE meta SET value='25' WHERE key='n_features'")
     for sid, blob in con.execute("SELECT id, features FROM slices").fetchall():
         con.execute("UPDATE slices SET features=? WHERE id=?", (np.frombuffer(blob, np.float32)[:-1].tobytes(), sid))
     con.commit()
@@ -151,3 +152,28 @@ def test_app_starts_and_reindexes_with_index_from_older_version(tmp_path):
         time.sleep(0.2)
     assert app.state()["index"]["state"] == "ready"
     assert len(load_slice_table(lib)) > 0
+
+
+def test_corrupt_blobs_with_current_version_are_rebuilt(tmp_path):
+    import sqlite3
+
+    import numpy as np
+
+    from loopforge.library import default_cache_path, load_slice_table, update_index
+
+    lib = tmp_path / "lib"
+    write(lib / "hats_124bpm.wav", render_loop(basic_pattern(2), 124.0, 2))
+    update_index(lib, jobs=1)
+    con = sqlite3.connect(default_cache_path(lib))
+    for sid, blob in con.execute("SELECT id, features FROM slices").fetchall():
+        con.execute("UPDATE slices SET features=? WHERE id=?", (np.frombuffer(blob, np.float32)[:-1].tobytes(), sid))
+    con.commit()
+    con.close()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "settings.json").write_text(json.dumps({"library": str(lib)}))
+    app = App(ws, jobs=1)
+    t0 = time.time()
+    while app.state()["index"]["state"] != "ready" and time.time() - t0 < 60:
+        time.sleep(0.2)
+    assert app.state()["index"]["state"] == "ready" and len(load_slice_table(lib)) > 0

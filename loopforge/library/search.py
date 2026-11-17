@@ -16,7 +16,6 @@ from loopforge.models import FEATURE_INDEX, FEATURE_NAMES, FEATURE_SPEC, N_FEATU
 # Per-group weight of the *whole group* in the distance (members share it).
 DEFAULT_GROUP_WEIGHTS: dict[str, float] = {
     "loudness": 0.0,  # gain is matched separately at assembly
-    "class": 0.0,  # instrument-scan helpers (tonal_db): the class label decides, not the distance
     "envelope": 1.0,
     "spectral": 1.0,
     "bands": 0.7,

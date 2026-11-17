@@ -135,9 +135,9 @@ class App:
         r = self.refs[rid]
         a = r.analysis
         n = max(1, a.n_samples)
-        from loopforge.analysis.instruments import summarize
-
-        roles = summarize(s.role for s in a.slices)
+        roles: dict[str, int] = {}
+        for s in a.slices:
+            roles[s.role] = roles.get(s.role, 0) + 1
         return {
             "id": rid, "name": r.name, "path": str(r.path), "url": file_url(r.path),
             "bpm": round(a.tempo.bpm, 2), "bars": a.tempo.bars, "beats": a.tempo.beats, "method": a.tempo.method,
@@ -148,7 +148,7 @@ class App:
         }
 
     # ----- library -----
-    def set_library(self, path: str) -> None:
+    def set_library(self, path: str, force: bool = False) -> None:
         p = Path(path).expanduser()
         if not p.is_dir():
             raise ValueError(f"folder not found: {path}")
@@ -159,9 +159,9 @@ class App:
             self._save_settings()
             self.index = {"state": "indexing", "done": 0, "total": 0, "current": "scanning…", "stats": None,
                           "error": None}
-        threading.Thread(target=self._index_worker, args=(p,), daemon=True).start()
+        threading.Thread(target=self._index_worker, args=(p, force), daemon=True).start()
 
-    def _index_worker(self, root: Path) -> None:
+    def _index_worker(self, root: Path, force: bool = False) -> None:
         from loopforge.library import update_index
 
         def prog(i: int, n: int, rel: str) -> None:
@@ -169,7 +169,7 @@ class App:
                 self.index.update(done=i, total=n, current=rel)
 
         try:
-            rep = update_index(root, params=self.aparams, jobs=self.jobs, progress=prog)
+            rep = update_index(root, params=self.aparams, jobs=self.jobs, progress=prog, force=force)
             with self.lock:
                 self.index["report"] = {"analysed": rep.analyzed, "unchanged": rep.unchanged,
                                         "removed": len(rep.removed), "failed": rep.failed, "seconds": rep.seconds}
@@ -190,7 +190,7 @@ class App:
             with self.lock:
                 self.index.update(state="none", stats=None)
             if reindex_if_stale:
-                self.set_library(self.settings["library"])
+                self.set_library(self.settings["library"], force=True)
         except FileNotFoundError:
             with self.lock:
                 self.index.update(state="none", stats=None)
