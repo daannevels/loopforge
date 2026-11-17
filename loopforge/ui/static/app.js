@@ -142,25 +142,9 @@ function saveSettings() {
 }
 function currentSettings() {
   return {
-    similarity: knobs.similarity.get(), swing: knobs.swing.get(), variations: knobs.variations.get(),
-    palette_size: knobs.palette.get(), bars: barsValue, seed: parseInt($("#seed").value || "0", 10), mode: modeValue,
+    variations: knobs.variations.get(), palette_size: knobs.palette.get(), bars: barsValue,
+    seed: parseInt($("#seed").value || "0", 10), seed_lock: $("#seed-lock").checked,
   };
-}
-
-let modeValue = "simple";
-const MODE_HELP = {
-  simple: "Keeps your reference's 16th rhythm and swaps each sound type (open hat, closed hat, …) for one library sample. Similarity = how close those sounds are.",
-  creative: "Also varies the rhythm (lower similarity = more changes), mixes several samples per sound type and allows swing.",
-};
-function setMode(v) {
-  modeValue = v === "creative" ? "creative" : "simple";
-  document.querySelectorAll("#seg-mode button").forEach(b => b.setAttribute("aria-checked", String(b.dataset.v === modeValue)));
-  $("#mode-help").textContent = MODE_HELP[modeValue];
-  const simple = modeValue === "simple";
-  $("#k-swing").classList.toggle("off", simple);
-  $("#k-palette").classList.toggle("off", simple);
-  $("#k-swing").title = simple ? "Simple mode is always straight" : "";
-  $("#k-palette").title = simple ? "Simple mode uses one sample per sound type" : "";
 }
 
 let barsValue = 2;
@@ -434,8 +418,8 @@ function renderStatus() {
 }
 
 function applySettings(s) {
-  knobs.similarity.set(s.similarity); knobs.swing.set(s.swing || 0); knobs.variations.set(s.variations);
-  knobs.palette.set(s.palette_size); setBars(+s.bars || 2); $("#seed").value = s.seed; setMode(s.mode || "simple");
+  knobs.variations.set(s.variations); knobs.palette.set(s.palette_size); setBars(+s.bars || 2);
+  $("#seed").value = s.seed; $("#seed-lock").checked = !!s.seed_lock;
 }
 
 async function refresh() {
@@ -497,31 +481,26 @@ function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;
 
 /* ---------------- init ---------------- */
 function init() {
-  knobs.similarity = makeKnob($("#k-similarity"), {
-    label: "Similarity", min: 0, max: 1, step: 0.01, value: 0.7, def: 0.7, fmt: v => Math.round(v * 100) + "%",
-    help: v => v >= 0.85 ? "very close to refs" : v >= 0.6 ? "same family" : v >= 0.35 ? "looser" : "wild", onChange: saveSettings,
-  });
-  knobs.swing = makeKnob($("#k-swing"), {
-    label: "Swing", min: 0, max: 0.5, step: 0.01, value: 0, def: 0, fmt: v => v === 0 ? "straight" : Math.round(v * 100) + "%",
-    help: v => v === 0 ? "" : v >= 0.3 ? "triplet feel" : "light shuffle", onChange: saveSettings,
-  });
   knobs.variations = makeKnob($("#k-variations"), {
-    label: "Variations", min: 1, max: 16, step: 1, value: 8, def: 8, fmt: v => String(v), help: () => "loops per run", onChange: saveSettings,
+    label: "Variations", min: 1, max: 16, step: 1, value: 8, def: 8, fmt: v => String(v), help: () => "loops per run, all different sounds", onChange: saveSettings,
   });
   knobs.palette = makeKnob($("#k-palette"), {
-    label: "Palette", min: 1, max: 4, step: 1, value: 3, def: 3, fmt: v => v + (v === 1 ? " sound" : " sounds"),
-    help: () => "per instrument role", onChange: saveSettings,
+    label: "Palette", min: 1, max: 4, step: 1, value: 1, def: 1, fmt: v => v + (v === 1 ? " sample" : " samples"),
+    help: v => v === 1 ? "one sample per sound type" : "per sound type, mixed", onChange: saveSettings,
   });
   document.querySelectorAll("#seg-bars button").forEach(b => (b.onclick = () => { setBars(+b.dataset.v); saveSettings(); }));
-  document.querySelectorAll("#seg-mode button").forEach(b => (b.onclick = () => { setMode(b.dataset.v); saveSettings(); }));
-  setMode("simple");
+  $("#seed-lock").addEventListener("change", saveSettings);
   $("#seed").addEventListener("change", saveSettings);
   $("#btn-dice").onclick = () => { $("#seed").value = Math.floor(Math.random() * 100000); saveSettings(); };
 
   $("#btn-generate").onclick = async () => {
     if (S && S.job.state === "running") { await api("/api/stop", {}); return; }
     player.stop();
-    try { await api("/api/generate", currentSettings()); shownRun = null; refresh(); }
+    try {
+      const r = await api("/api/generate", currentSettings());
+      if (r.seed != null) $("#seed").value = r.seed;
+      shownRun = null; refresh();
+    }
     catch (e) { toast(e.message); }
   };
   $("#runs").onchange = async e => {

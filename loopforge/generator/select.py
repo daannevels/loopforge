@@ -129,36 +129,110 @@ def assign_slices(
     return out
 
 
+@dataclass
+class RunMemory:
+    """What earlier variations of the same run used, so later ones pick different sounds."""
+
+    rows: set[int]
+    files: set[int]
+
+    @classmethod
+    def new(cls) -> "RunMemory":
+        return cls(set(), set())
+
+
+def same_type_candidates(profile: RefProfile, role_id: int, table: SliceTable, nn: NearestNeighbors,
+                         exclude: np.ndarray, p: GenParams) -> np.ndarray:
+    """Library rows that are clearly the same sound type as reference role `role_id`: closer to this
+    role's centroid than to any other role of the refs, and usable at the ref's level (gain within
+    the clamp). Sorted by closeness. Falls back to the few nearest rows if nothing qualifies."""
+    from loopforge.models import FEATURE_INDEX as FI
+
+    C = np.stack([r.centroid for r in profile.roles])
+    D = nn.distances(C, embedded=True)  # (roles, n)
+    D[:, exclude] = np.inf
+    own = D[role_id]
+    nearest_role = np.argmin(D, axis=0)
+    role = profile.roles[role_id]
+    gain_ok = np.abs(role.level_db - table.features[:, FI["peak_db"]]) <= p.gain_clamp_db
+    # must ring like the ref's sound: a quickly-dying "open hat" leaves holes (sounds choppy)
+    ref_decay = float(role.mean_features[FI["decay_ms"]])
+    ratio = table.features[:, FI["decay_ms"]] / max(ref_decay, 1.0)
+    decay_ok = (ratio >= p.simple_decay_range[0]) & (ratio <= p.simple_decay_range[1])
+    # close enough in absolute terms: a sound type the refs don't have (e.g. a rim shot) must not be
+    # filed under the nearest ref sound just because it is "least far"
+    near = own <= max(role.radius, p.simple_radius_floor) * p.simple_radius_scale
+    ok = np.isfinite(own) & (nearest_role == role_id) & gain_ok & decay_ok & near
+    rows = np.nonzero(ok)[0]
+    if len(rows) < p.palette_size:
+        finite = np.nonzero(np.isfinite(own))[0]
+        rows = finite[np.argsort(own[finite], kind="stable")[: max(p.palette_size, 4)]]
+    rows = rows[np.argsort(own[rows], kind="stable")]
+    per_file: dict[int, int] = {}
+    keep = []
+    for x in rows:  # loops repeat the same hit many times: cap per source file to spread the pool
+        f = int(table.file_idx[x])
+        if per_file.get(f, 0) < p.simple_per_file:
+            per_file[f] = per_file.get(f, 0) + 1
+            keep.append(int(x))
+    return np.array(keep[: p.simple_pool_max], dtype=np.int64)
+
+
 def choose_role_samples(
     profile: RefProfile,
     events: list[PatternEvent],
     table: SliceTable,
     nn: NearestNeighbors,
-    similarity: float,
     rng: np.random.Generator,
     p: GenParams,
     exclude: np.ndarray,
-    avoid: set[int] | None = None,
-) -> dict[int, int]:
-    """Simple mode: ONE library slice per sound type. Closest matches are likeliest; slices already
-    used by earlier variations of the same run are avoided while alternatives remain."""
-    avoid = avoid or set()
-    k = candidate_k(similarity, p)
-    tau = 0.15 + 0.6 * (1 - similarity)
-    used_roles = sorted({e.role for e in events})
-    chosen: dict[int, int] = {}
-    for r in used_roles:
-        role = profile.roles[r]
-        idx, dist = nn.query_diverse(role.centroid, 3 * k + 8, table.file_idx, max_per_group=p.candidates_per_file,
-                                     exclude=exclude, min_separation=0.05, embedded=True)
-        if len(idx) == 0:
-            raise RuntimeError(f"no library candidates for role {role.name}")
-        adj = dist + fit_penalty(table, idx, role, p)
-        order = np.argsort(adj, kind="stable")[:k]
-        pool = [int(idx[i]) for i in order]
-        pd = np.array([adj[i] for i in order])
-        fresh = [i for i, row in enumerate(pool) if row not in avoid and row not in chosen.values()]
-        cand = fresh or list(range(len(pool)))
-        w = np.exp(-(pd[cand] - pd[cand].min()) / tau)
-        chosen[r] = pool[cand[int(rng.choice(len(cand), p=w / w.sum()))]]
-    return chosen
+    memory: RunMemory | None = None,
+) -> dict[int, list[int]]:
+    """Simple mode: `palette_size` library slices per sound type, picked at random among same-type
+    candidates. Preference order: sample AND source file unused by earlier variations > sample unused >
+    anything. Within one loop, different sound types never share a sample or (if avoidable) a file."""
+    memory = memory or RunMemory.new()
+    taken_rows: set[int] = set()
+    taken_files: set[int] = set()
+    out: dict[int, list[int]] = {}
+    for r in sorted({e.role for e in events}):
+        pool = [int(x) for x in same_type_candidates(profile, r, table, nn, exclude, p)]
+        picks: list[int] = []
+        for _ in range(min(p.palette_size, len(pool))):
+            def f(row: int) -> int:
+                return int(table.file_idx[row])
+
+            tiers = [
+                [x for x in pool if x not in picks and x not in taken_rows and x not in memory.rows
+                 and f(x) not in memory.files and f(x) not in taken_files],
+                [x for x in pool if x not in picks and x not in taken_rows and x not in memory.rows],
+                [x for x in pool if x not in picks and x not in taken_rows],
+                [x for x in pool if x not in picks],
+            ]
+            cand = next((t for t in tiers if t), [])
+            if not cand:
+                break
+            row = cand[int(rng.integers(len(cand)))]
+            picks.append(row)
+            taken_rows.add(row)
+            taken_files.add(f(row))
+        out[r] = picks
+    for rows in out.values():
+        memory.rows.update(rows)
+        memory.files.update(int(table.file_idx[x]) for x in rows)
+    return out
+
+
+def assign_palette(events: list[PatternEvent], choice: dict[int, list[int]], rng: np.random.Generator,
+                   p: GenParams) -> list[int]:
+    """Row per event: palette rank 0 is the main sound; with a palette > 1 the others are mixed in
+    (weights `palette_weights`). Repeats are allowed, like a drum machine."""
+    out = []
+    for e in events:
+        pal = choice[e.role]
+        if len(pal) == 1:
+            out.append(pal[0])
+            continue
+        w = np.array([p.palette_weights[min(i, len(p.palette_weights) - 1)] for i in range(len(pal))])
+        out.append(pal[int(rng.choice(len(pal), p=w / w.sum()))])
+    return out

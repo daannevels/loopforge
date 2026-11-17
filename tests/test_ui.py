@@ -76,13 +76,13 @@ def test_full_flow(server):
     assert st["index"]["stats"]["files"] == 5
 
     # generate 2 variations
-    code, _ = call(base, "/api/generate", {"variations": 2, "seed": 3, "similarity": 0.6, "bars": 1})
-    assert code == 200
+    code, r = call(base, "/api/generate", {"variations": 2, "seed": 3, "seed_lock": True, "bars": 1})
+    assert code == 200 and r["seed"] == 3
     st = wait(base, lambda s: s["job"]["state"] in ("done", "error"))
     assert st["job"]["state"] == "done", st["job"]["error"]
     rows = st["job"]["rows"]
     assert len(rows) == 2 and rows[0]["bars"] == 1 and rows[0]["peaks"]
-    assert st["settings"]["similarity"] == 0.6
+    assert st["settings"]["seed"] == 3 and rows[0]["seed"] == 3
 
     # audio served, favourites toggle, outside paths refused
     code, wav = call(base, rows[0]["url"], raw=True)
@@ -98,6 +98,12 @@ def test_full_flow(server):
     s2 = app2.state()
     assert len(s2["refs"]) == 1 and s2["settings"]["library"] == str(server["lib"].resolve())
     assert len(s2["job"]["rows"]) == 2 and s2["runs"]
+
+    # unlocked seed: a fresh random seed per run
+    code, r = call(base, "/api/generate", {"variations": 1, "seed_lock": False, "bars": 1})
+    assert code == 200
+    wait(base, lambda s: s["job"]["state"] in ("done", "error"))
+    assert call(base, "/api/state")[1]["job"]["rows"][0]["seed"] == r["seed"]
 
     # remove ref
     assert call(base, "/api/refs/remove", {"id": ref["id"]})[0] == 200

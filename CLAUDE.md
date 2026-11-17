@@ -71,21 +71,27 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - **Profile**: refs are cut (or tiled) into templates of the output length; per step: onset prob, role
   distribution, accent (dB vs. role level). Flams (2nd hit ≥0.1 step later on the same step) are kept as
   sub-hits.
-- **Modes** (`GenParams.mode`, default `simple` since user feedback "choppy"):
-  - `simple`: straight 16ths, every step hit; sound type + level per step copied from one ref section
-    (empty steps get the most common type for that step); no swing, no flams, no rhythm mutation.
-    ONE library sample per sound type (repeats allowed); similarity only sets how close the samples are
-    (top-k pool); later variations in a run avoid samples used by earlier ones (`avoid_rows`).
-  - `creative`: the M3 behaviour below (mutations, palettes, flams, swing).
-  Diagnosis of "choppy" (creative @ 70%): ~9 of 32 hits rewritten per loop + hard 4 ms cuts of
-  slices that were already truncated in their dense source loops. Measured as level dip between 16ths
-  (refs 16.4 dB median / 27.7 dB p90); now every mode is at or below the refs.
+- **Product decision (user, final)**: only "simple" is exposed. Rhythm = an exact copy of a reference
+  section (same steps, sound type and level per hit, the ref's own flams; empty steps stay empty). No swing,
+  no similarity knob (fixed 1.0). UI/CLI expose Variations, Palette, Length, Seed (random per run unless
+  locked). `creative` (M3 mutation/palette/swing engine) stays in code, hidden (`--mode creative`).
+- **Simple-mode sound choice** (`select.same_type_candidates` + `choose_role_samples`): a library hit is
+  "the same sound type" as ref role R when it is nearer to R's centroid than to any other ref role, within
+  2× the spread (90th-pct radius) of the ref's own R hits, decays at 0.6–2× R's decay (a fast-dying "open
+  hat" sounds choppy), and needs ≤12 dB gain. Pool = closest 60, max 4 per source file (loops repeat the
+  same hit). Each variation picks `palette_size` (default 1) at random from the pool, preferring samples
+  AND files unused by earlier variations of the run (`RunMemory`), never sharing a sample between roles.
+  Palette > 1 mixes the extra samples in by weights .55/.3/.15/.1, repeats allowed.
+  Measured on the user's refs/library (3 seeds × 8): 32–33 distinct samples per run, none reused,
+  22 of 24 usable files; level dip between 16ths 15.0–15.6 dB median / 21.8–23.5 dB p90 (refs 16.4 / 27.7).
+- History: "choppy" feedback at creative 70% = ~9 of 32 hits rewritten per loop + hard 4 ms cuts of
+  slices already truncated in dense source loops.
 - **Tail extension** (`generator/tail.py`): if a slice is shorter than the slot it must fill (it was cut by
   the next hit in its source loop), it rings on naturally: overlap-added random (sometimes reversed) 20 ms
   grains from its own last 30 ms before the cut, RMS-matched, shaped with its measured decay (−20 dB per
   `decay_ms`) up to ~−40 dB, equal-power 6 ms crossfade. Stored per event (`tail_ms`, `tail_decay_ms`,
   `tail_seed`) so renders stay bit-identical. Fades are 10 ms out with 10 ms overlap into the next hit.
-- **Pattern** (creative): pick a random template; per-step mutation rate 0.6·(1−sim) resamples hit/role from
+- **Pattern** (creative, hidden): pick a random template; per-step mutation rate 0.6·(1−sim) resamples hit/role from
   sim·profile + (1−sim)·metric prior; shifts ±1 step; density kept within ±(5%+30%·(1−sim)); velocity =
   role level + step accent + noise. At sim=1 the rhythm equals a template (novelty guard comes in M4).
 - **Selection**: per role, diverse top-k (k = 4 + (1−sim)·28) around the role centroid with a fit penalty
@@ -126,5 +132,6 @@ CLI (+ small Gradio UI in M5). A JUCE/VST3 port comes later, so the engine must 
 - Re-analysing outputs that contain flams reports spurious swing (~0.1–0.15); the output grid is straight.
 
 ## Milestones
-M1 analysis + `analyze` ✅ · M2 library index + `neighbors` ✅ · M3 generator v1 ✅ · M4 similarity/novelty/
-variations · M5 listening UI ✅ (pulled forward; local web UI instead of Gradio).
+M1 analysis + `analyze` ✅ · M2 library index + `neighbors` ✅ · M3 generator v1 ✅ · M4 reshaped by the user's
+decision: rhythm is copied on purpose (no novelty guard on rhythm); variation = different sounds per variation ✅ ·
+M5 listening UI ✅ (local web UI instead of Gradio).

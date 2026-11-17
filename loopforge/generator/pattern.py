@@ -103,18 +103,17 @@ def generate_pattern(
     return events, profile.template_names[ti]
 
 
-def generate_simple_pattern(profile: RefProfile, rng: np.random.Generator) -> tuple[list[PatternEvent], str]:
-    """Straight 16ths on every step. Sound type and level per step come from one ref section;
-    steps the section leaves empty get the refs' most common sound type for that step."""
+def generate_simple_pattern(
+    profile: RefProfile, rng: np.random.Generator, keep_flams: bool = True
+) -> tuple[list[PatternEvent], str]:
+    """Copy the rhythm of one reference section exactly: the same steps, the same sound type and level
+    per hit, and (by default) the ref's own flams/rolls. Steps the ref leaves empty stay empty."""
     ti = int(rng.integers(len(profile.templates)))
-    prim = {e.step: e for e in profile.templates[ti] if e.sub_offset == 0}
-    events: list[PatternEvent] = []
-    for o in range(profile.n_steps):
-        if o in prim:
-            e = prim[o]
-            events.append(PatternEvent(o, e.role, float(min(e.vel_db, 0.0)), 0.0, "template"))
-        else:
-            r = int(np.argmax(profile.step_role_prob[o]))
-            vel = profile.roles[r].level_db + profile.accent_db[o]
-            events.append(PatternEvent(o, r, float(min(vel, 0.0)), 0.0, "filled"))
+    events = [
+        PatternEvent(e.step, e.role, float(min(e.vel_db, 0.0)), e.sub_offset,
+                     "flam" if e.sub_offset > 0 else "template")
+        for e in profile.templates[ti]
+        if keep_flams or e.sub_offset == 0
+    ]
+    events.sort(key=lambda e: (e.step, e.sub_offset))
     return events, profile.template_names[ti]

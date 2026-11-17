@@ -205,25 +205,50 @@ def test_cli_generate_and_render(world, tmp_path, capsys):
     assert file_sha1(tmp_path / "re.wav") == file_sha1(wav)
 
 
-def test_simple_mode_keeps_ref_rhythm_and_one_sample_per_role(world):
-    avoid: set[int] = set()
-    seen = []
-    for seed in range(3):
-        recipe, audio = generate_one(world["profile"], world["table"], world["nn"], GenParams(bars=2, mode="simple"),
-                                     seed, world["exclude"], recipe_loader(), avoid_rows=avoid)
+def test_simple_mode_copies_ref_rhythm_exactly(world):
+    pr = world["profile"]
+    from loopforge.generator.select import RunMemory
+
+    mem = RunMemory.new()
+    files_per_var = []
+    for seed in range(4):
+        recipe, audio = generate_one(pr, world["table"], world["nn"], GenParams(bars=2), seed, world["exclude"],
+                                     recipe_loader(), memory=mem)
         assert recipe.mode == "simple" and recipe.swing == 0.0
-        steps = [p["step"] for p in recipe.pattern]
-        assert steps == list(range(32))  # every 16th, exactly once, no flams
+        tmpl = pr.templates[pr.template_names.index(recipe.template)]
+        # same hits, same order, same sound type and level as the reference section
+        assert [(p["step"], p["sub_offset"]) for p in recipe.pattern] == [(e.step, round(e.sub_offset, 3)) for e in tmpl]
+        assert [p["role"] for p in recipe.pattern] == [e.role for e in tmpl]
+        assert [p["vel_db"] for p in recipe.pattern] == [round(min(e.vel_db, 0.0), 2) for e in tmpl]
         by_role: dict[str, set] = {}
         for e in recipe.events:
             by_role.setdefault(e.role, set()).add((e.source_rel, e.slice_index))
-        assert all(len(v) == 1 for v in by_role.values())  # one sample per sound type
-        tmpl = world["profile"].templates[world["profile"].template_names.index(recipe.template)]
-        ref_roles = {e.step: world["profile"].roles[e.role].name for e in tmpl if e.sub_offset == 0}
-        assert all(p_role == ref_roles[s] for s, p_role in ((e.step, e.role) for e in recipe.events) if s in ref_roles)
+        assert all(len(v) == 1 for v in by_role.values())  # palette 1: one sample per sound type
         assert seam_ratio(audio) < 1.0
-        seen.append(frozenset().union(*by_role.values()))
-    assert seen[0] != seen[1]  # later variations prefer different samples
+        files_per_var.append({e.source_rel for e in recipe.events})
+    # later variations avoid the files earlier ones used where the (tiny) library allows it
+    assert len(files_per_var[0] & files_per_var[1]) < len(files_per_var[1])
+    assert len(set().union(*files_per_var)) >= 5
+
+
+def test_simple_mode_picks_same_sound_type(world):
+    from loopforge.generator.select import same_type_candidates
+
+    pr, t = world["profile"], world["table"]
+    voice = np.array([t.files[i]["rel"].split("_")[0] for i in t.file_idx])
+    for role in pr.roles:
+        rows = same_type_candidates(pr, role.id, t, world["nn"], world["exclude"], GenParams())
+        kinds, counts = np.unique(voice[rows], return_counts=True)
+        assert counts.max() / counts.sum() >= 0.8, (role.name, dict(zip(kinds, counts)))
+
+
+def test_simple_mode_palette(world):
+    recipe, _ = generate_one(world["profile"], world["table"], world["nn"], GenParams(bars=2, palette_size=2), 3,
+                             world["exclude"], recipe_loader())
+    by_role: dict[str, set] = {}
+    for e in recipe.events:
+        by_role.setdefault(e.role, set()).add((e.source_rel, e.slice_index))
+    assert max(len(v) for v in by_role.values()) == 2
 
 
 def test_extend_tail_continues_and_decays():

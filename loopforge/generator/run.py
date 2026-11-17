@@ -8,7 +8,7 @@ from loopforge.config import ANALYZER_VERSION, GenParams
 from loopforge.generator.pattern import generate_pattern, generate_simple_pattern
 from loopforge.generator.profile import RefProfile
 from loopforge.generator.recipe import Recipe, RecipeEvent, SliceLoader, finalize, mix_events
-from loopforge.generator.select import assign_slices, build_palettes, choose_role_samples
+from loopforge.generator.select import RunMemory, assign_palette, assign_slices, build_palettes, choose_role_samples
 from loopforge.library.index import SliceTable
 from loopforge.library.search import NearestNeighbors
 from loopforge.models import FEATURE_INDEX
@@ -39,10 +39,10 @@ def generate_one(
     loader: SliceLoader,
     refs_info: list[dict] | None = None,
     version: str = "",
-    avoid_rows: set[int] | None = None,
+    memory: RunMemory | None = None,
 ) -> tuple[Recipe, np.ndarray]:
-    """One loop. `avoid_rows` (simple mode): library rows used by earlier variations; this
-    variation's rows are added to it."""
+    """One loop. `memory` (simple mode): samples/files used by earlier variations of the run; this
+    variation's picks are added to it."""
     rng = np.random.default_rng(seed)
     bpm = float(p.bpm or profile.bpm)
     sr = profile.sr
@@ -52,17 +52,15 @@ def generate_one(
 
     simple = p.mode == "simple"
     if simple:
-        pattern, template = generate_simple_pattern(profile, rng)
-        choice = choose_role_samples(profile, pattern, table, nn, p.similarity, rng, p, exclude, avoid_rows)
-        rows = [choice[e.role] for e in pattern]
+        pattern, template = generate_simple_pattern(profile, rng, keep_flams=p.keep_flams)
+        choice = choose_role_samples(profile, pattern, table, nn, rng, p, exclude, memory)
+        rows = assign_palette(pattern, choice, rng, p)
         swing = 0.0
     else:
         pattern, template = generate_pattern(profile, p.similarity, rng, p)
         palettes = build_palettes(profile, pattern, table, nn, p.similarity, rng, p, exclude)
         rows = assign_slices(pattern, palettes, table, rng, p)
         swing = p.swing
-    if avoid_rows is not None:
-        avoid_rows.update(rows)
 
     positions = [
         int(round((e.step + (swing if e.step % 2 else 0.0) + e.sub_offset) * step_samples)) % N for e in pattern

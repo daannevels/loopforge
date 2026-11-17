@@ -57,12 +57,18 @@ class AnalysisParams:
 @dataclass(frozen=True)
 class GenParams:
     bars: int = 2
-    similarity: float = 0.7  # 1 = stay close to the refs, 0 = loose
+    similarity: float = 1.0  # creative mode only: 1 = keep the refs' rhythm, 0 = loose
     swing: float = 0.0  # output swing (delay of odd 16ths, in steps); straight by default
     bpm: float | None = None  # override output tempo (default: refs' tempo)
     # "simple": straight 16ths, ref rhythm + sound type per step kept, one sample per sound type
     # "creative": mutated rhythm, palettes, flams, swing (M3 behaviour)
     mode: str = "simple"
+    keep_flams: bool = True  # simple mode: keep the ref's flams/rolls (part of its rhythm)
+    simple_pool_max: int = 60  # simple mode: max same-type candidates per sound type
+    simple_per_file: int = 4  # ... and at most this many from one source file
+    simple_decay_range: tuple[float, float] = (0.6, 2.0)  # candidate decay / ref sound decay
+    simple_radius_scale: float = 2.0  # candidates within this x the spread of the ref's own hits
+    simple_radius_floor: float = 0.3  # minimum spread (embedding units) for very consistent ref sounds
     tail_extend: bool = True  # rebuild tails of ringing hits that were cut short in their source loop
 
     # Roles (clusters of reference hits)
@@ -76,7 +82,7 @@ class GenParams:
     timbre_group_weights: tuple[tuple[str, float], ...] = (("envelope", 3.0), ("mfcc", 0.5))
 
     # Selection
-    palette_size: int = 3  # slices per role (main sound + variations)
+    palette_size: int = 1  # library samples per sound type (1 = one open hat, one closed hat, ...)
     palette_weights: tuple[float, ...] = (0.55, 0.3, 0.15, 0.1)  # pick probability by palette rank
     k_min: int = 4  # candidate pool per role at similarity 1
     k_max: int = 32  # ... at similarity 0

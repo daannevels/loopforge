@@ -31,6 +31,7 @@ class Role:
     long: bool  # may ring past the next hit (open hats, long shakers)
     share: float  # fraction of reference hits
     n: int
+    radius: float = float("inf")  # 90th-pct distance of the ref's own hits to the centroid (timbre spread)
 
     def to_dict(self) -> dict:
         fi = FEATURE_INDEX
@@ -40,6 +41,7 @@ class Role:
             "level_db": round(self.level_db, 2), "level_std": round(self.level_std, 2), "long": self.long,
             "centroid_hz": round(float(f[fi["centroid_hz"]]), 1), "decay_ms": round(float(f[fi["decay_ms"]]), 1),
             "attack_ms": round(float(f[fi["attack_ms"]]), 1), "band_high": round(float(f[fi["band_high"]]), 3),
+            "radius": round(self.radius, 3) if np.isfinite(self.radius) else None,
         }
 
 
@@ -218,6 +220,8 @@ def build_profile(
             level_db=float(peaks[m].mean()), level_std=float(peaks[m].std()) if m.sum() > 1 else 1.0,
             long=bool(np.median(F[m, fi["decay_ms"]]) > params.long_role_decay_ms),
             share=float(m.mean()), n=int(m.sum()),
+            radius=float(np.percentile(np.sqrt(((E[m] - E[m].mean(axis=0)) ** 2).sum(axis=1)), 90)) if m.sum() > 1
+            else float("inf"),
         ))
 
     # Templates on the output grid.

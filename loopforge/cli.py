@@ -194,8 +194,15 @@ def _gen_params(args: argparse.Namespace):
 def cmd_generate(args: argparse.Namespace) -> int:
     from loopforge.service import GenRequest, load_ref, run_generation
 
+    import random
+
     aparams = _analysis_params(args)
     gp = _gen_params(args)
+    if args.seed is None:
+        args.seed = random.randrange(1_000_000)
+    if gp.mode == "simple":
+        gp = replace(gp, similarity=1.0, swing=0.0)
+    print(f"seed {args.seed}")
     refs = []
     for r in args.refs:
         ref = load_ref(r, aparams, bpm=args.bpm)
@@ -291,16 +298,16 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--refs", nargs="+", required=True, help="1-3 reference loops")
     g.add_argument("--library", required=True)
     g.add_argument("--cache", default=None)
-    g.add_argument("--mode", choices=["simple", "creative"], default=None,
-                   help="simple (default): straight 16ths, ref rhythm, one sample per sound type; "
-                        "creative: mutated rhythm, sample palettes, flams, swing")
+    # creative mode (mutated rhythm, swing) is kept in the engine but hidden: the product is "simple"
+    g.add_argument("--mode", choices=["simple", "creative"], default=None, help=argparse.SUPPRESS)
     g.add_argument("--bars", type=int, default=2)
     g.add_argument("--variations", type=int, default=8)
-    g.add_argument("--similarity", type=float, default=0.7, help="0 = loose, 1 = close to the refs (default 0.7)")
-    g.add_argument("--seed", type=int, default=42, help="variation i uses seed+i")
-    g.add_argument("--swing", type=float, default=None, help="output swing in steps (0.33 = triplet feel)")
+    g.add_argument("--similarity", type=float, default=None, help=argparse.SUPPRESS)
+    g.add_argument("--seed", type=int, default=None, help="base seed (variation i uses seed+i); default: random")
+    g.add_argument("--swing", type=float, default=None, help=argparse.SUPPRESS)
     g.add_argument("--bpm", type=float, default=None, help="override tempo of refs/output")
-    g.add_argument("--palette-size", type=int, default=None, help="slices per sound role (default 3)")
+    g.add_argument("--palette-size", type=int, default=None,
+                   help="library samples per sound type (default 1 = one open hat, one closed hat, ...)")
     g.add_argument("--max-file-share", type=float, default=None, help="max share of hits from one file (0.4)")
     g.add_argument("--allow-ref-files", action="store_true", help="allow slices from the refs' own files")
     g.add_argument("--out", default="./out")

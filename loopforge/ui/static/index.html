@@ -54,23 +54,14 @@
     <section class="panel engine">
       <div class="panel-head">
         <h2>Engine</h2>
-        <span class="hint">drag knobs · double-click to reset</span>
+        <span class="hint">rhythm = your reference, sounds = your library</span>
       </div>
       <div class="engine-row">
         <div class="knobs">
-          <div class="knob-wrap" id="k-similarity"></div>
-          <div class="knob-wrap" id="k-swing"></div>
           <div class="knob-wrap" id="k-variations"></div>
           <div class="knob-wrap" id="k-palette"></div>
         </div>
         <div class="engine-side">
-          <div class="field">
-            <label>Mode</label>
-            <div class="seg" id="seg-mode" role="radiogroup" aria-label="Generation mode">
-              <button data-v="simple" role="radio" title="Straight 16ths, your reference's rhythm; each sound type swapped for one library sample">Simple</button><button data-v="creative" role="radio" title="Rhythm is varied too (less similarity = more changes), several samples per sound type, swing">Creative</button>
-            </div>
-            <div class="mode-help" id="mode-help"></div>
-          </div>
           <div class="field">
             <label>Length</label>
             <div class="seg" id="seg-bars" role="radiogroup" aria-label="Loop length in bars">
@@ -80,9 +71,11 @@
           <div class="field">
             <label for="seed">Seed</label>
             <div class="seed-row">
-              <input id="seed" type="number" min="0" max="999999" step="1" value="42">
-              <button class="ghost small" id="btn-dice" title="Random seed">⚄</button>
+              <input id="seed" type="number" min="0" max="999999" step="1" value="42" aria-describedby="seed-help">
+              <button class="ghost small" id="btn-dice" title="New random seed">⚄</button>
+              <label class="lock"><input type="checkbox" id="seed-lock"> Lock</label>
             </div>
+            <div class="mode-help" id="seed-help">A new random seed every run, so every run picks new sounds. Lock it to repeat a run exactly.</div>
           </div>
           <button class="generate" id="btn-generate"><span class="gtext">Generate</span><span class="gprog"></span></button>
         </div>
